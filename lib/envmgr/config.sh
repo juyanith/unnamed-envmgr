@@ -10,6 +10,33 @@ envmgr_chezmoi() {
   chezmoi --source "$machine_dir/config" "$@"
 }
 
+envmgr_age_key_file() {
+  printf '%s\n' "$(envmgr_config_home)/envmgr/age.key"
+}
+
+# Print the age recipient (public key) for an identity file.
+envmgr_age_recipient() {
+  local key="$1"
+  local recipient=""
+
+  recipient="$(sed -n 's/^# public key: //p' "$key" | head -n 1)"
+  [[ -n "$recipient" ]] || recipient="$(chezmoi age-keygen --convert "$key")" || return 1
+  printf '%s\n' "$recipient"
+}
+
+envmgr_chezmoi_config_text() {
+  local machine_dir="$1"
+  local key=""
+
+  key="$(envmgr_age_key_file)"
+  printf '# Managed by envmgr; changed by envmgr init.\n'
+  printf 'sourceDir = "%s"\n' "$machine_dir/config"
+  [[ -r "$key" ]] || return 0
+  printf 'encryption = "age"\n\n[age]\n'
+  printf '  identity = "%s"\n' "$key"
+  printf '  recipient = "%s"\n' "$(envmgr_age_recipient "$key")"
+}
+
 # Write chezmoi.toml so plain chezmoi commands use the selected machine.
 envmgr_write_chezmoi_config() {
   local machine_dir="$1"
@@ -17,7 +44,7 @@ envmgr_write_chezmoi_config() {
   local desired=""
 
   file="$(envmgr_config_home)/chezmoi/chezmoi.toml"
-  desired="$(printf '# Managed by envmgr; changed by envmgr init.\nsourceDir = "%s"\n' "$machine_dir/config")"
+  desired="$(envmgr_chezmoi_config_text "$machine_dir")" || return 1
   if [[ -f "$file" && "$(cat -- "$file")" == "$desired" ]]; then
     return 0
   fi
@@ -26,11 +53,51 @@ envmgr_write_chezmoi_config() {
   printf '%s\n' "$desired" >"$file"
 }
 
+# Before Chezmoi reads encrypted sources: add the age settings to an
+# envmgr-managed chezmoi.toml once a key exists (for example, after it was
+# copied from another machine), and explain a missing key.
+envmgr_config_prepare() {
+  local machine_dir="$1"
+  local file=""
+  local desired=""
+
+  file="$(envmgr_config_home)/chezmoi/chezmoi.toml"
+  if [[ -f "$file" ]] && \
+    grep -Fxq "sourceDir = \"$machine_dir/config\"" "$file" && \
+    [[ "$(head -n 1 -- "$file")" == "# Managed by envmgr"* ]]; then
+    desired="$(envmgr_chezmoi_config_text "$machine_dir")" || return 1
+    [[ "$(cat -- "$file")" == "$desired" ]] || printf '%s\n' "$desired" >"$file"
+  fi
+
+  if [[ ! -r "$(envmgr_age_key_file)" && -d "$machine_dir/config" ]] && \
+    [[ -n "$(find "$machine_dir/config" -name 'encrypted_*' -print | head -n 1)" ]]; then
+    envmgr_die 1 "machine $(basename -- "$machine_dir") has encrypted files, but the age key is missing; copy $(envmgr_display_path "$(envmgr_age_key_file)") from a machine that has it"
+  fi
+}
+
+# Create the age identity that encrypts adopted secrets. It never leaves
+# this machine except by the user copying it.
+envmgr_create_age_key() {
+  local key=""
+
+  key="$(envmgr_age_key_file)"
+  [[ -e "$key" ]] && return 0
+  mkdir -p -- "$(dirname -- "$key")"
+  (umask 077 && chezmoi age-keygen --output "$key" >/dev/null 2>&1) || \
+    envmgr_die 1 "could not create the age key $key"
+  chmod 600 "$key"
+  printf 'Created the age key %s.\n' "$(envmgr_display_path "$key")"
+  printf 'Back it up (for example, in a password manager) and copy it to every\n'
+  printf 'machine that restores encrypted files. Envmgr never commits it, and\n'
+  printf 'encrypted files cannot be restored without it.\n'
+}
+
 # Print Chezmoi status lines for config targets ("XY path").
 envmgr_config_status() {
   local machine_dir="$1"
 
   [[ -d "$machine_dir/config" ]] || return 0
+  envmgr_config_prepare "$machine_dir" || return 1
   envmgr_chezmoi "$machine_dir" status --exclude scripts
 }
 
@@ -158,6 +225,7 @@ envmgr_restore_config() {
     printf 'config: nothing to restore\n'
     return 0
   fi
+  envmgr_config_prepare "$machine_dir" || return 1
   status="$(envmgr_chezmoi "$machine_dir" status --exclude scripts "$@")" || return 1
   [[ -n "$status" ]] && count="$(printf '%s\n' "$status" | grep -c .)"
   if ((count == 0)); then
@@ -202,12 +270,12 @@ envmgr_adopt_config() {
   local add_args=()
 
   shift 3
-  [[ "$encrypt" == false ]] || \
-    envmgr_die 1 "--encrypt is not implemented yet (age key setup is part of envmgr setup)"
   mkdir -p -- "$machine_dir/config"
 
   for target in "$@"; do
     [[ -e "$target" || -L "$target" ]] || envmgr_die 1 "target does not exist: $target"
+    [[ "$target" != "$(envmgr_age_key_file)" ]] || \
+      envmgr_die 1 "the age key must never be committed: $target"
     if envmgr_config_is_managed "$machine_dir" "$target"; then
       source="$(envmgr_config_source_paths "$machine_dir" "$target")"
       case "$(basename -- "$source")" in
@@ -216,6 +284,7 @@ envmgr_adopt_config() {
           ;;
       esac
     fi
+    [[ "$encrypt" == true ]] && continue
     while IFS= read -r file; do
       if envmgr_looks_secret "$file"; then
         envmgr_die 1 "$file looks like a secret; adopt it with --encrypt"
@@ -223,6 +292,13 @@ envmgr_adopt_config() {
     done < <(find "$target" \( -type f -o -type l \) -print)
   done
 
+  if [[ "$encrypt" == true ]]; then
+    envmgr_create_age_key
+    envmgr_config_prepare "$machine_dir" || return 1
+    grep -Fq 'encryption = "age"' "$(envmgr_config_home)/chezmoi/chezmoi.toml" 2>/dev/null || \
+      envmgr_die 1 "chezmoi.toml is not managed by envmgr; run envmgr init $(basename -- "$machine_dir") first"
+    add_args+=(--encrypt)
+  fi
   [[ "$exact" == true ]] && add_args+=(--exact)
   if [[ "$exact" == true ]]; then
     envmgr_warn "exact directories delete unmanaged files inside them on restore"

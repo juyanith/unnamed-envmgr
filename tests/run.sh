@@ -980,6 +980,209 @@ test_setup_guards_existing_chezmoi_source() {
   assert_contains "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" "machines/mac/config"
 }
 
+test_adopt_encrypt() {
+  selected_mac
+  local key="$HOME/.config/envmgr/age.key"
+  mkdir -p "$HOME/.ssh"
+  printf 'very-secret\n' >"$HOME/.ssh/id_ed25519"
+  run_envmgr adopt config --encrypt "$HOME/.ssh/id_ed25519"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Created the age key"
+  [[ "$(ls -l "$key" | cut -c1-10)" == "-rw-------" ]] || fail "age key is not private"
+  local source=""
+  source="$(find "$cfg" -name 'encrypted_*')"
+  [[ -n "$source" ]] || fail "no encrypted source"
+  ! grep -q very-secret "$source" || fail "source holds plaintext"
+  assert_contains "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" 'encryption = "age"'
+  run_envmgr check config
+  assert_eq "$rc" 0 "$out"
+  run_envmgr list config
+  assert_contains "$out" "encrypted  .ssh/id_ed25519"
+
+  rm "$HOME/.ssh/id_ed25519"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$HOME/.ssh/id_ed25519")" very-secret
+
+  # A second adoption reuses the key; the key itself is never adopted.
+  printf 'token\n' >"$HOME/.netrc"
+  run_envmgr adopt config --encrypt "$HOME/.netrc"
+  assert_eq "$rc" 0 "$out"
+  [[ "$out" != *"Created the age key"* ]] || fail "key recreated"
+  run_envmgr adopt config --encrypt "$key"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "must never be committed"
+}
+
+test_encrypted_files_need_the_key() {
+  selected_mac
+  printf 'very-secret\n' >"$HOME/.netrc"
+  run_envmgr adopt config --encrypt "$HOME/.netrc"
+  assert_eq "$rc" 0 "$out"
+
+  # A machine without the key gets an explanation instead of a Chezmoi error.
+  mv "$HOME/.config/envmgr/age.key" "$work/age.key"
+  run_envmgr check config
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "the age key is missing"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "the age key is missing"
+
+  # Once the key is copied in, envmgr adds the age settings to chezmoi.toml.
+  printf '# Managed by envmgr; changed by envmgr init.\nsourceDir = "%s"\n' "$cfg" \
+    >"$HOME/.config/chezmoi/chezmoi.toml"
+  mv "$work/age.key" "$HOME/.config/envmgr/age.key"
+  run_envmgr check config
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" 'encryption = "age"'
+}
+
+# Agent stand-in: records its directory and arguments.
+make_agent() {
+  mkdir -p "$work/bin"
+  cat >"$work/bin/agent" <<'AGENT'
+#!/bin/sh
+[ -d machines/mac ] && echo in-data >"$work/agent.dir"
+printf '%s\n---\n' "$@" >"$work/agent.args"
+exit "${FAKE_AGENT_RC:-0}"
+AGENT
+  chmod +x "$work/bin/agent"
+}
+
+test_evaluate_starts_agent() {
+  selected_mac
+  run_envmgr evaluate
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "no agent is configured"
+
+  printf 'agent=missing-agent\n' >>"$HOME/.config/envmgr/config"
+  run_envmgr evaluate
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "agent command not found"
+
+  make_agent
+  sed -i.bak '/^agent=/d' "$HOME/.config/envmgr/config"
+  printf 'agent=%s --flag\n' "$work/bin/agent" >>"$HOME/.config/envmgr/config"
+  printf 'private-content\n' >"$cfg/dot_alpha"
+  run_envmgr evaluate config
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "pending  .alpha"
+  assert_eq "$(cat "$work/agent.dir")" in-data
+  local args=""
+  args="$(cat "$work/agent.args")"
+  assert_eq "$(head -n 1 "$work/agent.args")" --flag
+  assert_contains "$args" 'envmgr machine "mac"'
+  assert_contains "$args" "machines/mac/SPEC.md"
+  assert_contains "$args" '`envmgr check config` (exit 3'
+  assert_contains "$args" "pending  .alpha"
+  assert_contains "$args" "Do not run envmgr restore"
+  [[ "$args" != *private-content* ]] || fail "prompt includes target contents"
+
+  FAKE_AGENT_RC=7 run_envmgr evaluate
+  assert_eq "$rc" 7 "$out"
+}
+
+# Clone a data origin into $data with one machine selected and a git
+# provider entry for the data repository itself.
+data_checkout() {
+  make_data_origin
+  rm -rf "$data"
+  git clone -q "$data_origin" "$data"
+  mkdir -p "$data/machines/mac/packages/git"
+  printf '%s %s main\n' "$data_origin" "$data" >"$data/machines/mac/packages/git/repos"
+  git -C "$data" add -A
+  git -C "$data" -c user.name=t -c user.email=t@t commit -qm repos
+  git -C "$data" push -q origin main
+  run_envmgr init --data "$data" mac
+}
+
+test_migrate_moves_repository() {
+  data_checkout
+  git -C "$data" branch feature
+  git -C "$data" push -q -u origin feature
+  git -C "$data" tag v1
+  git -C "$data" push -q origin v1
+  local new="$work/origins/new.git"
+  git init -q --bare -b main "$new"
+
+  printf 'dirty\n' >"$data/dirty"
+  run_envmgr migrate "$new" --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "uncommitted changes"
+  rm "$data/dirty"
+
+  git -C "$data" -c user.name=t -c user.email=t@t commit -q --allow-empty -m local
+  run_envmgr migrate "$new" --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "branch main has 1 unpushed commit(s)"
+  git -C "$data" push -q origin main
+
+  run_envmgr migrate "$data_origin" --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "origin already is"
+  run_envmgr migrate "$work/origins/data.git/../data.git" --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "is not empty"
+
+  run_envmgr migrate "$new" --dry-run
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "branches  feature main"
+  assert_contains "$out" "tags      1"
+  assert_eq "$(git ls-remote "$new")" "" "dry run pushed"
+
+  run_envmgr migrate "$new" --yes
+  assert_eq "$rc" 0 "$out"
+  local refs=""
+  refs="$(git ls-remote "$new")"
+  assert_contains "$refs" "refs/heads/main"
+  assert_contains "$refs" "refs/heads/feature"
+  assert_contains "$refs" "refs/tags/v1"
+  [[ "$refs" != *refs/remotes* ]] || fail "pushed remote-tracking refs"
+  assert_eq "$(git -C "$data" remote get-url origin)" "$new"
+  assert_contains "$(cat "$HOME/.config/envmgr/config")" "data_url=$new"
+  assert_eq "$(cat "$data/machines/mac/packages/git/repos")" "$new $data main"
+  assert_contains "$out" "machines/mac/packages/git/repos"
+  assert_contains "$out" "envmgr migrate --follow $new"
+  [[ -n "$(git ls-remote "$data_origin")" ]] || fail "old remote changed"
+}
+
+test_migrate_follow() {
+  data_checkout
+  local new="$work/origins/new.git"
+  git init -q --bare -b main "$new"
+
+  git -C "$data" -c user.name=t -c user.email=t@t commit -q --allow-empty -m unpushed
+  git -C "$data" push -q "$new" origin/main:refs/heads/main
+  run_envmgr migrate --follow "$new"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "does not contain this checkout's HEAD"
+  assert_eq "$(git -C "$data" remote get-url origin)" "$data_origin"
+
+  git -C "$data" reset -q --hard origin/main
+  run_envmgr migrate --follow "$new" --dry-run
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(git -C "$data" remote get-url origin)" "$data_origin"
+  run_envmgr migrate --follow "$new"
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(git -C "$data" remote get-url origin)" "$new"
+  assert_contains "$(cat "$HOME/.config/envmgr/config")" "data_url=$new"
+  assert_eq "$(git -C "$data" for-each-ref refs/envmgr-follow)" "" "temporary refs left"
+}
+
+test_setup_reports_missing_age_key() {
+  make_data_origin
+  git clone -q "$data_origin" "$work/seed2"
+  printf 'x\n' >"$work/seed2/machines/mac/config/encrypted_dot_secret.age"
+  git -C "$work/seed2" add -A
+  git -C "$work/seed2" -c user.name=t -c user.email=t@t commit -qm enc
+  git -C "$work/seed2" push -q origin main
+  run_setup "$data_origin" "" 1 ""
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "has encrypted files"
+  assert_contains "$out" "~/.config/envmgr/age.key"
+}
+
 # --- runner ----------------------------------------------------------------
 
 tests=()

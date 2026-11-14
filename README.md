@@ -7,10 +7,10 @@ it. See [DESIGN.md](DESIGN.md) for the full specification.
 > [!WARNING]
 > **Work in progress.** Envmgr is still being built. Commands, options, and the data repository layout can change or break between versions. Envmgr changes files, packages, and system settings, so preview with `--dry-run` and keep backups. If you choose to use it, you do so at your own risk: it comes as is, with no warranty of any kind.
 
-**Status:** ready for testing. Implemented: `setup`, `init`, `check`,
-`list`, `restore`, `adopt`, `drop`, system units, and the `git`, `homebrew`,
-`omarchy`, `flatpak`, and `rpm-ostree` providers. Not implemented yet:
-`evaluate`, `migrate`, and `adopt config --encrypt`.
+**Status:** ready for testing. Every command in DESIGN.md is implemented:
+`setup`, `init`, `check`, `list`, `restore`, `adopt` (including
+`--encrypt`), `drop`, `evaluate`, `migrate`, system units, and the `git`,
+`homebrew`, `omarchy`, `flatpak`, and `rpm-ostree` providers.
 
 ## Requirements
 
@@ -38,7 +38,9 @@ steps. It:
    `git@github.com:juyanith/envmgr-data.git` into `~/Work/Git/envmgr-data`).
 4. Selects this machine from the data repository, creates a new one
    (optionally copied from an existing machine), or skips.
-5. Optionally records an agent command for `envmgr evaluate`.
+5. If the machine has encrypted files and no age key, explains how to copy
+   `~/.config/envmgr/age.key` from another machine.
+6. Optionally records an agent command for `envmgr evaluate`.
 
 Then review and apply:
 
@@ -51,6 +53,18 @@ envmgr restore
 While drift remains, `~/.local/state/envmgr/change_summary` exists.
 `envmgr restore` exits `75` when a reboot or re-login is needed; rerun it
 afterward.
+
+## Other commands
+
+```sh
+envmgr adopt config --encrypt ~/.netrc   # secrets: stored only as age ciphertext
+envmgr evaluate [config|package|system]  # start the agent with the current check
+envmgr migrate <url>                     # move envmgr-data to a new, empty remote
+envmgr migrate --follow <url>            # then, on every other machine
+```
+
+The first `--encrypt` creates `~/.config/envmgr/age.key`. Back it up and copy
+it to each machine that restores encrypted files; it is never committed.
 
 ## Development
 

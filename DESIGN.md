@@ -156,7 +156,11 @@ complete:
    `envmgr init`. When Chezmoi currently uses a source outside the data
    repository (for example, the legacy checkout), setup says so, recommends
    skip, and asks before switching.
-5. **Agent.** Optionally record the agent command for `evaluate`.
+5. **Age key.** When the selected machine has `encrypted_` files and
+   `~/.config/envmgr/age.key` is missing, explain how to copy the key from
+   another machine. Setup never generates a key, because a new key cannot
+   decrypt existing files.
+6. **Agent.** Optionally record the agent command for `evaluate`.
 
 #### `envmgr init`
 
@@ -173,15 +177,22 @@ complete:
 
 `migrate` moves the whole data repository, with its history, to a new remote:
 
-1. Check that the data checkout is clean, all local branches are pushed, and
-   the new remote is empty.
-2. Run `git push --mirror <url>`.
+1. Fetch `origin` (with `--prune` and tags), then check that the data
+   checkout is clean, every local branch tracks a branch on `origin` and has
+   no unpushed commits, and the new remote is empty.
+2. Preview and confirm, then push every branch on `origin` (the default
+   branch first, so a new hosted repository adopts it) and every tag. This
+   replaces `git push --mirror`, which from a working checkout would also
+   publish remote-tracking refs.
 3. Run `git remote set-url origin <url>`, and update `data_url=`.
 4. Update any git-provider entries that reference the old URL in every
    machine's manifests, and leave those edits uncommitted for review.
 5. Print the follow-up step for other machines: `envmgr migrate --follow
-   <url>` only changes `origin` and `data_url=` after verifying that the new
-   remote contains the current `HEAD`.
+   <url>` only changes `origin` and `data_url=` after verifying that a
+   branch of the new remote contains the current `HEAD`. It fetches into a
+   temporary ref namespace and removes it afterward.
+
+When `origin` already is `<url>`, `migrate` only records `data_url=`.
 
 The old remote is never deleted.
 
@@ -340,8 +351,11 @@ system.drift=1
 
 ## `evaluate [category]`
 
-`evaluate` runs the `agent=` command from the data repository root, with one
-appended argument: the initial prompt. The prompt contains:
+`evaluate [category] [--offline]` runs `envmgr check` for the selected
+categories, then replaces itself with the `agent=` command, run from the data
+repository root, with one appended argument: the initial prompt. The command
+is split on whitespace (quotes are not interpreted), and `evaluate` exits
+with the agent's exit code. The prompt contains:
 
 - the machine ID and the paths to `machine.conf`, `SPEC.md`, and the data
   repository's `AGENTS.md`;
@@ -356,7 +370,18 @@ appended argument: the initial prompt. The prompt contains:
 - Files are unmanaged until adopted, including secret files.
 - Secret-bearing files may be adopted only with `--encrypt` (Chezmoi age
   encryption), so `envmgr-data` holds only ciphertext. The age identity lives
-  at `~/.config/envmgr/age.key` and is never committed.
+  at `~/.config/envmgr/age.key` (mode `600`) and is never committed.
+- The first `adopt config --encrypt` creates the key with `chezmoi
+  age-keygen` when it is missing, and asks the user to back it up and copy
+  it to every machine that restores the encrypted files. Chezmoi's built-in
+  age is used, so no `age` binary is needed.
+- When the key exists, the envmgr-managed `chezmoi.toml` also sets
+  `encryption = "age"` and the `[age]` identity and recipient. Before any
+  command that decrypts (`check config`, `restore config`, `adopt config
+  --encrypt`), envmgr adds those settings if the key was copied in after
+  `init`, and fails with instructions if the machine has `encrypted_` files
+  but no key.
+- The age key itself cannot be adopted.
 - `adopt config` refuses plaintext files that match common secret patterns
   (private keys, `*token*`, `.netrc`, `credentials`, and similar names), in
   addition to Chezmoi's own secret detection.
@@ -390,3 +415,5 @@ appended argument: the initial prompt. The prompt contains:
 | 13 | `check` refreshes metadata online by default; `--offline` skips | 2026-11-14 |
 | 14 | Secrets only through Chezmoi age encryption | 2026-11-14 |
 | 15 | Agent invoked as a command with the prompt appended as the last argument | 2026-11-14 |
+| 16 | `migrate` pushes `origin`'s branches and tags instead of `--mirror` | 2026-11-14 |
+| 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand; setup never generates one | 2026-11-14 |

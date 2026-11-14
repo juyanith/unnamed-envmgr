@@ -39,6 +39,10 @@ source "$ENVMGR_ROOT/lib/envmgr/system.sh"
 source "$ENVMGR_ROOT/lib/envmgr/commands.sh"
 # shellcheck source=lib/envmgr/setup.sh
 source "$ENVMGR_ROOT/lib/envmgr/setup.sh"
+# shellcheck source=lib/envmgr/evaluate.sh
+source "$ENVMGR_ROOT/lib/envmgr/evaluate.sh"
+# shellcheck source=lib/envmgr/migrate.sh
+source "$ENVMGR_ROOT/lib/envmgr/migrate.sh"
 
 envmgr_usage() {
   cat <<'EOF'
@@ -52,12 +56,14 @@ usage: envmgr <command> [arguments]
   restore [config [target...]] [--yes] [--dry-run]
   restore system [unit...] [--force] [--yes] [--dry-run]
   restore package [provider] [--yes] [--dry-run]
-  adopt config [--exact] target...
+  adopt config [--exact] [--encrypt] target...
   adopt package <provider> <package...>
   drop config [--delete] [--yes] [--dry-run] target...
   drop package [--delete] [--yes] [--dry-run] <provider> <package...>
+  evaluate [config|system|package] [--offline]
+  migrate <url> [--yes] [--dry-run]
+  migrate --follow <url> [--dry-run]
 
-Not yet implemented: evaluate and migrate.
 See DESIGN.md for the full command interface.
 EOF
 }
@@ -77,10 +83,9 @@ main() {
     restore) envmgr_cmd_restore "$@" ;;
     adopt) envmgr_cmd_adopt "$@" ;;
     drop) envmgr_cmd_drop "$@" ;;
+    evaluate) envmgr_cmd_evaluate "$@" ;;
+    migrate) envmgr_cmd_migrate "$@" ;;
     -h|--help|help) envmgr_usage ;;
-    evaluate|migrate)
-      envmgr_die 1 "'$command' is not implemented yet"
-      ;;
     "")
       envmgr_usage >&2
       return 2

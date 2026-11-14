@@ -331,6 +331,28 @@ envmgr_setup_agent() {
   envmgr_kv_set "$config" agent "$agent"
 }
 
+# The age key is copied by hand, never generated here: a new key could not
+# decrypt files that another machine encrypted.
+envmgr_setup_age_key() {
+  local data=""
+  local machine=""
+  local config=""
+
+  machine="$(envmgr_kv_get "$(envmgr_local_config_file)" machine 2>/dev/null)" || return 0
+  data="$(envmgr_data_dir)"
+  config="$data/machines/$machine/config"
+  [[ -d "$config" && -n "$(find "$config" -name 'encrypted_*' -print | head -n 1)" ]] || return 0
+  envmgr_setup_step "Age key"
+  if [[ -r "$(envmgr_age_key_file)" ]]; then
+    printf 'The age key for encrypted files is present.\n'
+    return 0
+  fi
+  printf 'Machine %s has encrypted files. Before envmgr restore, copy the age key\n' "$machine"
+  printf 'from a machine that has it (or from your backup) to %s,\n' \
+    "$(envmgr_display_path "$(envmgr_age_key_file)")"
+  printf 'readable only by you (chmod 600).\n'
+}
+
 envmgr_cmd_setup() {
   [[ $# -eq 0 ]] || envmgr_usage_error "setup takes no arguments"
   envmgr_detect_platform
@@ -338,6 +360,7 @@ envmgr_cmd_setup() {
   envmgr_setup_prerequisites
   envmgr_setup_data
   envmgr_setup_machine
+  envmgr_setup_age_key
   envmgr_setup_agent
   exec 3<&-
   printf '\nSetup is complete. Next: envmgr check, then envmgr restore.\n'
