@@ -1264,6 +1264,145 @@ test_setup_reports_missing_age_key() {
   assert_contains "$out" "~/.config/envmgr/age.key"
 }
 
+test_save_commits_and_pushes() {
+  data_checkout
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "nothing to save for mac"
+
+  mkdir -p "$HOME/.config/example"
+  printf 'a\n' >"$HOME/.config/example/a.toml"
+  run_envmgr adopt config "$HOME/.config/example"
+  assert_eq "$rc" 0 "$out"
+  printf 'brew\n' >"$data/machines/mac/packages/git/extra"
+  printf 'other\n' >"$data/machines/other/note"
+  printf 'staged\n' >"$data/top"
+  git -C "$data" add top
+
+  run_envmgr save --dry-run
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "config/dot_config/example/a.toml"
+  assert_contains "$out" "config: dot_config/example/a.toml"
+  assert_contains "$out" "package: git"
+  assert_contains "$out" "machines/other/"
+  assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 0 "dry run committed"
+
+  run_envmgr save
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "rerun with --yes"
+
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "pushed to origin/main"
+  assert_eq "$(git -C "$data" rev-parse HEAD)" "$(git --git-dir="$data_origin" rev-parse main)"
+  assert_eq "$(git -C "$data" log -1 --format=%s)" "Update mac"
+  assert_contains "$(git -C "$data" show --stat HEAD)" "dot_config/example/a.toml"
+  [[ "$(git -C "$data" show --stat HEAD)" != *other/note* ]] || fail "committed another machine"
+  assert_eq "$(git -C "$data" diff --cached --name-only)" top "other staged change kept"
+  assert_contains "$(git -C "$data" status --porcelain)" "?? machines/other/"
+
+  printf 'b\n' >"$HOME/.config/example/a.toml"
+  run_envmgr adopt config "$HOME/.config/example/a.toml"
+  run_envmgr save --no-push -m "Tweak example" --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(git -C "$data" log -1 --format=%s)" "Tweak example"
+  assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 1
+  # A later save pushes earlier commits even with nothing new to commit.
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "1 earlier commit(s) are not pushed yet"
+  assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 0
+}
+
+test_save_rebases_onto_other_machines() {
+  data_checkout
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  git clone -q "$data_origin" "$work/second"
+  printf 'y\n' >"$work/second/machines/other/dot_y"
+  git -C "$work/second" add -A
+  git -C "$work/second" commit -qm other
+  git -C "$work/second" push -q origin main
+
+  printf 'z\n' >"$data/machines/mac/config/dot_z"
+  printf 'dirty\n' >>"$data/machines/other/machine.conf"
+  printf 'untracked\n' >"$data/README"
+  run_envmgr save --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "would block pulling them"
+  assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 0 "committed before refusing"
+  git -C "$data" checkout -q -- machines/other/machine.conf
+
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "origin has 1 new commit(s)"
+  assert_eq "$(git -C "$data" rev-parse HEAD)" "$(git --git-dir="$data_origin" rev-parse main)"
+  [[ -f "$data/machines/other/dot_y" ]] || fail "did not rebase onto origin"
+
+  # Local commits outside the machine directory are left to the user.
+  git -C "$work/second" pull -q
+  printf 'w\n' >"$work/second/machines/other/dot_w"
+  git -C "$work/second" add -A
+  git -C "$work/second" commit -qm other2
+  git -C "$work/second" push -q origin main
+  printf 'top\n' >"$data/top"
+  git -C "$data" add top
+  git -C "$data" commit -qm top
+  printf 'z2\n' >"$data/machines/mac/config/dot_z"
+  run_envmgr save --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "local commits change files outside machines/mac"
+}
+
+test_save_conflict_keeps_local_commit() {
+  data_checkout
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  git clone -q "$data_origin" "$work/second"
+  printf 'theirs\n' >"$work/second/machines/mac/config/dot_x"
+  git -C "$work/second" commit -qam theirs
+  git -C "$work/second" push -q origin main
+
+  printf 'ours\n' >"$data/machines/mac/config/dot_x"
+  run_envmgr save --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "the commit is local only"
+  assert_eq "$(git -C "$data" branch --show-current)" main "rebase not aborted"
+  assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 1
+  assert_eq "$(cat "$data/machines/mac/config/dot_x")" ours
+}
+
+test_save_refuses_plaintext_secrets_and_wrong_branch() {
+  data_checkout
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  local cfg="$data/machines/mac/config"
+  printf 'x\n' >"$cfg/encrypted_private_dot_netrc.age"
+  printf 'plain\n' >"$cfg/private_dot_netrc"
+  run_envmgr save --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "plaintext copy of an encrypted target"
+  rm "$cfg/private_dot_netrc"
+
+  printf 'AGE-SECRET-KEY-1ABC\n' >"$cfg/dot_keyfile"
+  run_envmgr save --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "looks like a secret"
+  rm "$cfg/dot_keyfile"
+  mkdir -p "$cfg/private_dot_ssh"
+  printf 'k\n' >"$cfg/private_dot_ssh/id_ed25519"
+  run_envmgr save --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "looks like a secret"
+  rm -r "$cfg/private_dot_ssh"
+  assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 0
+
+  git -C "$data" checkout -q -b feature
+  run_envmgr save --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "on branch feature, expected main"
+  run_envmgr save --bogus
+  assert_eq "$rc" 2 "$out"
+}
+
 # --- runner ----------------------------------------------------------------
 
 tests=()

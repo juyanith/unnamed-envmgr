@@ -9,7 +9,7 @@ it. See [DESIGN.md](DESIGN.md) for the full specification.
 
 **Status:** ready for testing. Every command in DESIGN.md is implemented:
 `setup`, `init`, `check`, `list`, `restore`, `adopt` (including
-`--encrypt`), `drop`, `evaluate`, `migrate`, system units, and the `git`,
+`--encrypt`), `drop`, `evaluate`, `migrate`, `save`, system units, and the `git`,
 `homebrew`, `omarchy`, `flatpak`, and `rpm-ostree` providers.
 
 ## Requirements
@@ -57,6 +57,8 @@ afterward.
 ## Other commands
 
 ```sh
+envmgr adopt config ~/.config/example    # start managing a file or directory
+envmgr save                              # commit this machine's changes and push them
 envmgr adopt config --encrypt ~/.netrc   # secrets: stored only as age ciphertext
 envmgr evaluate [config|package|system]  # start the agent with the current check
 envmgr migrate <url>                     # move envmgr-data to a new, empty remote

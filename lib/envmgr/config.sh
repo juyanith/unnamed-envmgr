@@ -249,17 +249,24 @@ envmgr_restore_config() {
   printf 'config: restored %d target(s)\n' "$count"
 }
 
-# Basename and content patterns for files that must be encrypted to adopt.
-envmgr_looks_secret() {
-  local file="$1"
-  local name=""
-
-  name="$(basename -- "$file")"
-  case "$name" in
+# File names that must be encrypted to adopt. Returns 1 for *.pub, which is
+# never a secret, and 2 when the name alone does not decide.
+envmgr_looks_secret_name() {
+  case "$1" in
     *.pub) return 1 ;;
     id_rsa*|id_dsa*|id_ecdsa*|id_ed25519*|*.pem|*.key|*.p12|*.pfx) return 0 ;;
     .netrc|.pgpass|credentials|credentials.*|*token*|*secret*) return 0 ;;
   esac
+  return 2
+}
+
+# Basename and content patterns for files that must be encrypted to adopt.
+envmgr_looks_secret() {
+  local file="$1"
+  local rc=0
+
+  envmgr_looks_secret_name "$(basename -- "$file")" || rc=$?
+  [[ "$rc" -ne 2 ]] && return "$rc"
   [[ -f "$file" ]] && grep -Eq -- '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' "$file" 2>/dev/null
 }
 

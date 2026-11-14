@@ -100,6 +100,7 @@ envmgr adopt   config|package ...
 envmgr drop    config|package ...
 envmgr evaluate [config|package|system]
 envmgr migrate [--no-history] <url> | migrate --follow <url>
+envmgr save [-m <message>] [--no-push]
 ```
 
 - Every command acts on the active machine from `~/.config/envmgr/config`.
@@ -113,8 +114,10 @@ envmgr migrate [--no-history] <url> | migrate --follow <url>
   `--yes` skips confirmation; `--dry-run` prints the preview and exits.
 - Exit codes: `0` success or in sync; `1` error; `2` usage error; `3` check
   found drift; `75` reboot or re-login required before continuing.
-- Envmgr never commits or pushes. It pulls only through the `git` provider
-  (fast-forward only, clean checkouts only), and pushes only in `migrate`.
+- Envmgr commits only in `save`, and only the active machine's directory.
+  It pushes only in `save` and `migrate`, and pulls only through the `git`
+  provider (fast-forward only, clean checkouts only) and the rebase in
+  `save`.
 - Envmgr is written in Bash and must run under Bash 3.2, because
   `envmgr setup` runs from `/bin/bash` on a fresh Mac before Homebrew exists.
   No associative arrays, `mapfile`, `${var,,}`, or other Bash 4+ features.
@@ -211,6 +214,39 @@ Envmgr never deletes the renamed checkout.
 When `origin` already is `<url>`, `migrate` only records `data_url=`.
 
 The old remote is never deleted.
+
+#### `envmgr save`
+
+`save` commits the active machine's directory, `machines/<id>/`, in the data
+checkout and pushes it, so other machines can pull it with `restore`:
+
+1. Refuse unless the checkout is on the branch the machine's `git` provider
+   entry for the data checkout tracks (`main` when there is none), has an
+   `origin`, and has no rebase or merge in progress. Fetch that branch.
+2. Stage `machines/<id>/` into a scratch copy of the index, which gives the
+   preview: `git status --short` and `git diff --stat`, the commit message,
+   unpushed earlier commits, and new commits on `origin`. Changes outside
+   `machines/<id>/`, including another machine's directory, are listed in a
+   warning and never committed; anything already staged there stays staged.
+3. Refuse to commit a config source that looks like a plaintext secret: a
+   non-encrypted source beside an encrypted one for the same target, a target
+   name that `adopt config` requires `--encrypt` for, or a private key or age
+   secret key in the content.
+4. When `origin` has new commits, refuse before committing if earlier local
+   commits change files outside `machines/<id>/`, or if tracked files outside
+   it have uncommitted changes, because the rebase in step 6 would need them
+   resolved by hand.
+5. Confirm, then `git add -A` and `git commit -- machines/<id>/`. The default
+   message is `Update <id>`, with one line per category listing changed
+   config sources, package providers, and system units; `-m` replaces it.
+6. Rebase onto `origin/<branch>` when it has new commits (machines edit
+   separate directories, so this normally applies cleanly), then push. When
+   the rebase conflicts, envmgr aborts it and exits `1`, leaving the commit
+   local; the same happens when the push fails. Running `save` again with
+   nothing new to commit pushes earlier unpushed commits.
+
+`--no-push` commits only, without fetching first if the network is down.
+With nothing to commit and nothing to push, `save` prints so and exits `0`.
 
 ## Configuration
 
@@ -437,3 +473,4 @@ with the agent's exit code. The prompt contains:
 | 16 | `migrate` pushes `origin`'s branches and tags instead of `--mirror` | 2026-11-14 |
 | 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand; setup never generates one | 2026-11-14 |
 | 18 | `migrate --no-history` pushes one root commit; checkouts that cannot follow are renamed and re-cloned, never deleted | 2026-11-14 |
+| 19 | `save` commits only the active machine's directory and pushes it, rebasing onto `origin` when the local commits stay inside that directory; envmgr otherwise never commits | 2026-11-14 |
