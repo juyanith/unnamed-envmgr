@@ -171,3 +171,120 @@ envmgr_cmd_list() {
     envmgr_warn "listing $category is not implemented yet"
   fi
 }
+
+# Refresh the config result and marker after a command changed config state.
+envmgr_refresh_config_check() {
+  local machine_dir="$1"
+
+  envmgr_check_config "$machine_dir" >/dev/null || true
+  envmgr_refresh_summary "$(basename -- "$machine_dir")"
+}
+
+envmgr_cmd_restore() {
+  local category=""
+  local assume_yes=false
+  local dry_run=false
+  local machine_dir=""
+  local provider=""
+  local targets=()
+  local rc=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --yes|-y) assume_yes=true ;;
+      --dry-run|-n) dry_run=true ;;
+      -*) envmgr_usage_error "unknown option for restore: $1" ;;
+      *)
+        if [[ -z "$category" && ${#targets[@]} -eq 0 ]]; then
+          category="$(envmgr_parse_category "$1")"
+        elif [[ "$category" == config ]]; then
+          targets+=("$(envmgr_absolute_target "$1")")
+        elif [[ "$category" == package && -z "$provider" ]]; then
+          provider="$1"
+        elif [[ "$category" == package ]]; then
+          envmgr_usage_error "envmgr does not upgrade individual packages; see $ENVMGR_PARTIAL_UPGRADES_URL"
+        else
+          envmgr_usage_error "restore accepts target arguments only for config"
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  machine_dir="$(envmgr_active_machine_dir refuse)"
+  # Order: package -> config -> system. Only config is implemented so far.
+  if [[ -z "$category" || "$category" == package ]]; then
+    envmgr_warn "package restore is not implemented yet${provider:+ ($provider)}"
+  fi
+  if [[ -z "$category" || "$category" == config ]]; then
+    envmgr_restore_config "$machine_dir" "$assume_yes" "$dry_run" \
+      ${targets[@]+"${targets[@]}"} || rc=$?
+    [[ "$dry_run" == true ]] || envmgr_refresh_config_check "$machine_dir"
+  fi
+  if [[ -z "$category" || "$category" == system ]]; then
+    envmgr_warn "system restore is not implemented yet"
+  fi
+  return "$rc"
+}
+
+envmgr_cmd_adopt() {
+  local category="${1:-}"
+  local exact=false
+  local encrypt=false
+  local machine_dir=""
+  local targets=()
+
+  [[ $# -gt 0 ]] && shift
+  case "$category" in
+    config) ;;
+    package) envmgr_die 1 "adopting packages is not implemented yet" ;;
+    *) envmgr_usage_error "adopt requires a category: config or package" ;;
+  esac
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --exact) exact=true ;;
+      --encrypt) encrypt=true ;;
+      -*) envmgr_usage_error "unknown option for adopt config: $1" ;;
+      *) targets+=("$(envmgr_absolute_target "$1")") ;;
+    esac
+    shift
+  done
+  ((${#targets[@]})) || envmgr_usage_error "adopt config requires at least one target"
+
+  machine_dir="$(envmgr_active_machine_dir refuse)"
+  envmgr_adopt_config "$machine_dir" "$exact" "$encrypt" "${targets[@]}"
+  envmgr_refresh_config_check "$machine_dir"
+}
+
+envmgr_cmd_drop() {
+  local category="${1:-}"
+  local delete=false
+  local assume_yes=false
+  local dry_run=false
+  local machine_dir=""
+  local targets=()
+  local rc=0
+
+  [[ $# -gt 0 ]] && shift
+  case "$category" in
+    config) ;;
+    package) envmgr_die 1 "dropping packages is not implemented yet" ;;
+    *) envmgr_usage_error "drop requires a category: config or package" ;;
+  esac
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --delete) delete=true ;;
+      --yes|-y) assume_yes=true ;;
+      --dry-run|-n) dry_run=true ;;
+      -*) envmgr_usage_error "unknown option for drop config: $1" ;;
+      *) targets+=("$(envmgr_absolute_target "$1")") ;;
+    esac
+    shift
+  done
+  ((${#targets[@]})) || envmgr_usage_error "drop config requires at least one target"
+
+  machine_dir="$(envmgr_active_machine_dir refuse)"
+  envmgr_drop_config "$machine_dir" "$delete" "$assume_yes" "$dry_run" "${targets[@]}" || rc=$?
+  [[ "$dry_run" == true ]] || envmgr_refresh_config_check "$machine_dir"
+  return "$rc"
+}

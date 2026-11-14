@@ -41,8 +41,11 @@ usage: envmgr <command> [arguments]
   init [--data <path>] --new <machine-id> [--from <machine-id>]
   check [config|package|system] [--offline]
   list [config|package|system]
+  restore [config [target...]] [--yes] [--dry-run]
+  adopt config [--exact] target...
+  drop config [--delete] [--yes] [--dry-run] target...
 
-Not yet implemented: setup, restore, adopt, drop, evaluate, migrate.
+Not yet implemented: setup, evaluate, migrate, packages, and system units.
 See DESIGN.md for the full command interface.
 EOF
 }
@@ -55,8 +58,11 @@ main() {
     init) envmgr_cmd_init "$@" ;;
     check) envmgr_cmd_check "$@" ;;
     list) envmgr_cmd_list "$@" ;;
+    restore) envmgr_cmd_restore "$@" ;;
+    adopt) envmgr_cmd_adopt "$@" ;;
+    drop) envmgr_cmd_drop "$@" ;;
     -h|--help|help) envmgr_usage ;;
-    setup|restore|adopt|drop|evaluate|migrate)
+    setup|evaluate|migrate)
       envmgr_die 1 "'$command' is not implemented yet"
       ;;
     "")

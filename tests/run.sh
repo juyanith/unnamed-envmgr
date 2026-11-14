@@ -196,6 +196,171 @@ EOF
   assert_contains "$out" "modify     .profile"
 }
 
+selected_mac() {
+  new_fixture mac
+  run_envmgr init --data "$data" mac
+  cfg="$data/machines/mac/config"
+}
+
+test_restore_applies_and_clears_marker() {
+  selected_mac
+  printf 'one\n' >"$cfg/dot_alpha"
+  run_envmgr check
+  assert_eq "$rc" 3
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$HOME/.alpha")" one
+  [[ ! -e "$HOME/.local/state/envmgr/change_summary" ]] || fail "marker not cleared"
+}
+
+test_restore_dry_run_changes_nothing() {
+  selected_mac
+  printf 'one\n' >"$cfg/dot_alpha"
+  run_envmgr restore --dry-run
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "+one"
+  [[ ! -e "$HOME/.alpha" ]] || fail "dry run wrote a target"
+}
+
+test_restore_backs_up_preexisting_file() {
+  selected_mac
+  printf 'from envmgr\n' >"$cfg/dot_zshrc"
+  printf 'original\n' >"$HOME/.zshrc"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Backed up ~/.zshrc"
+  assert_eq "$(cat "$HOME"/.local/state/envmgr/backups/*/.zshrc)" original
+  assert_eq "$(cat "$HOME/.zshrc")" "from envmgr"
+}
+
+test_restore_skips_backup_in_exact_dir() {
+  selected_mac
+  mkdir -p "$cfg/dot_config/exact_nvim" "$HOME/.config/nvim"
+  printf 'managed\n' >"$cfg/dot_config/exact_nvim/init.lua"
+  printf 'old\n' >"$HOME/.config/nvim/init.lua"
+  printf 'stale\n' >"$HOME/.config/nvim/stale.lua"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  [[ ! -d "$HOME/.local/state/envmgr/backups" ]] || fail "exact_ target was backed up"
+  [[ ! -e "$HOME/.config/nvim/stale.lua" ]] || fail "exact_ did not remove stale file"
+}
+
+test_restore_selected_targets_only() {
+  selected_mac
+  printf 'a\n' >"$cfg/dot_alpha"
+  printf 'b\n' >"$cfg/dot_beta"
+  run_envmgr restore config "$HOME/.alpha" --yes
+  assert_eq "$rc" 0 "$out"
+  [[ -e "$HOME/.alpha" && ! -e "$HOME/.beta" ]] || fail "restored the wrong targets"
+}
+
+test_restore_requires_confirmation_without_terminal() {
+  # Only meaningful when the test process has no controlling terminal.
+  { : </dev/tty; } 2>/dev/null && return 0
+  selected_mac
+  printf 'a\n' >"$cfg/dot_alpha"
+  run_envmgr restore config
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "rerun with --yes"
+  [[ ! -e "$HOME/.alpha" ]] || fail "restored without confirmation"
+}
+
+test_restore_package_names_rejected() {
+  selected_mac
+  run_envmgr restore package omarchy firefox
+  assert_eq "$rc" 2 "$out"
+  assert_contains "$out" "does not upgrade individual packages"
+  assert_contains "$out" "Partial_upgrades_are_unsupported"
+}
+
+test_restore_refuses_distribution_mismatch() {
+  selected_mac
+  run_envmgr restore config --yes
+  ENVMGR_DISTRIBUTION=omarchy ENVMGR_OS=linux run_envmgr restore config --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "expects os=darwin"
+}
+
+test_adopt_file_and_directory() {
+  selected_mac
+  printf 'export A=1\n' >"$HOME/.profile"
+  mkdir -p "$HOME/.config/tool/sub"
+  printf 'x\n' >"$HOME/.config/tool/a.conf"
+  printf 'y\n' >"$HOME/.config/tool/sub/b.conf"
+  run_envmgr adopt config ~/.profile "$HOME/.config/tool/"
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$cfg/dot_profile")" "export A=1"
+  assert_eq "$(cat "$cfg/dot_config/tool/sub/b.conf")" y
+  run_envmgr check config
+  assert_eq "$rc" 0 "$out"
+}
+
+test_adopt_refuses_secrets() {
+  selected_mac
+  mkdir -p "$HOME/.ssh" "$HOME/.config/app"
+  printf 'key\n' >"$HOME/.ssh/id_ed25519"
+  printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n' >"$HOME/.config/app/data"
+  run_envmgr adopt config "$HOME/.ssh/id_ed25519"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "adopt it with --encrypt"
+  run_envmgr adopt config "$HOME/.config/app"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "looks like a secret"
+  [[ ! -e "$cfg/dot_config/app" ]] || fail "secret directory was adopted"
+}
+
+test_adopt_refuses_partially_managed_target() {
+  selected_mac
+  printf '#!/bin/sh\ncat\n' >"$cfg/modify_dot_bashrc"
+  printf 'x\n' >"$HOME/.bashrc"
+  run_envmgr adopt config "$HOME/.bashrc"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "partially managed"
+}
+
+test_drop_keeps_local_copy() {
+  selected_mac
+  printf 'a\n' >"$cfg/dot_alpha"
+  run_envmgr restore config --yes
+  run_envmgr drop config "$HOME/.alpha"
+  assert_eq "$rc" 0 "$out"
+  [[ ! -e "$cfg/dot_alpha" ]] || fail "source not removed"
+  assert_eq "$(cat "$HOME/.alpha")" a
+}
+
+test_drop_delete_preserves_unmanaged_files() {
+  selected_mac
+  mkdir -p "$cfg/dot_config/tool/inner" "$cfg/dot_config/gone"
+  printf 'm\n' >"$cfg/dot_config/tool/managed"
+  printf 'n\n' >"$cfg/dot_config/tool/inner/nested"
+  printf 'g\n' >"$cfg/dot_config/gone/file"
+  run_envmgr restore config --yes
+  printf 'mine\n' >"$HOME/.config/tool/unmanaged"
+  run_envmgr drop config --delete --yes "$HOME/.config/tool" "$HOME/.config/gone"
+  assert_eq "$rc" 0 "$out"
+  [[ ! -e "$HOME/.config/tool/managed" ]] || fail "managed file kept"
+  [[ ! -e "$HOME/.config/tool/inner" ]] || fail "empty managed directory kept"
+  assert_eq "$(cat "$HOME/.config/tool/unmanaged")" mine
+  [[ ! -e "$HOME/.config/gone" ]] || fail "empty managed directory kept"
+  [[ -d "$HOME/.config" ]] || fail "unmanaged parent removed"
+}
+
+test_drop_delete_refuses_partial() {
+  selected_mac
+  printf '#!/bin/sh\ncat\n' >"$cfg/modify_dot_bashrc"
+  printf 'x\n' >"$HOME/.bashrc"
+  run_envmgr drop config --delete --yes "$HOME/.bashrc"
+  assert_eq "$rc" 1 "$out"
+  assert_eq "$(cat "$HOME/.bashrc")" x
+}
+
+test_drop_unmanaged_target_fails() {
+  selected_mac
+  printf 'x\n' >"$HOME/.other"
+  run_envmgr drop config "$HOME/.other"
+  assert_eq "$rc" 1 "$out"
+}
+
 # --- runner ----------------------------------------------------------------
 
 tests=()

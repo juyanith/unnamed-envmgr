@@ -208,10 +208,10 @@ Commands:
 - **`list config`** prints targets and their kind: file, directory, `modify`,
   or encrypted.
 - **`restore config [target...]`** previews the diff, then confirms and
-  applies. A target with local changes is copied to
-  `~/.local/state/envmgr/backups/<timestamp>/` before it is overwritten,
-  except inside `exact_` directories. To restore an older version, check it
-  out with Git first.
+  applies. Every existing file that restore will change is first copied to
+  `~/.local/state/envmgr/backups/<timestamp>/`, whether or not Chezmoi wrote
+  it before, except inside `exact_` directories. To restore an older version,
+  check it out with Git first.
 - **`adopt config [--exact] [--encrypt] target...`** runs `chezmoi add`. For
   a directory, this covers every regular file and symlink currently inside
   it; later files are not managed until adopted. `--exact` warns that

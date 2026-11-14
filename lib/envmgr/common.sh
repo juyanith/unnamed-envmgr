@@ -4,6 +4,7 @@
 ENVMGR_EXIT_DRIFT=3
 ENVMGR_EXIT_USAGE=2
 ENVMGR_EXIT_REBOOT=75
+ENVMGR_PARTIAL_UPGRADES_URL="https://wiki.archlinux.org/title/System_maintenance#Partial_upgrades_are_unsupported"
 
 envmgr_die() {
   local code="$1"
@@ -115,6 +116,43 @@ envmgr_data_dir() {
   [[ -d "$data/machines" ]] || \
     envmgr_die 1 "data repository has no machines/ directory: $data"
   printf '%s\n' "$data"
+}
+
+# Ask before a change. Returns 0 to proceed, 1 when declined.
+envmgr_confirm() {
+  local prompt="$1"
+  local assume_yes="$2"
+  local reply=""
+
+  [[ "$assume_yes" == true ]] && return 0
+  if ! { : </dev/tty; } 2>/dev/null; then
+    envmgr_die 1 "confirmation required but no terminal is available; rerun with --yes"
+  fi
+  printf '%s [y/N] ' "$prompt" >/dev/tty
+  read -r reply </dev/tty || reply=""
+  [[ "$reply" == [Yy] || "$reply" == [Yy][Ee][Ss] ]]
+}
+
+# Convert a target argument to an absolute path under $HOME.
+envmgr_absolute_target() {
+  local target=""
+
+  target="$(envmgr_expand_path "$1")"
+  [[ "$target" == /* ]] || target="$PWD/$target"
+  # Normalize trailing slashes so directory arguments match Chezmoi output.
+  while [[ "$target" == */ && "$target" != / ]]; do
+    target="${target%/}"
+  done
+  [[ "$target" == "$HOME"/* ]] || envmgr_die 1 "target is not under \$HOME: $1"
+  printf '%s\n' "$target"
+}
+
+# Show paths under $HOME as ~/relative for messages.
+envmgr_display_path() {
+  case "$1" in
+    "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
 }
 
 envmgr_timestamp() {
