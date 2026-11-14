@@ -56,6 +56,8 @@ afterward.
 
 ## Other commands
 
+`envmgr --help` lists every command with its options. The most common:
+
 ```sh
 envmgr adopt config ~/.config/example  # start managing a file or directory
 envmgr adopt config --encrypt ~/.netrc # secrets: stored only as ciphertext
