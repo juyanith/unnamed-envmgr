@@ -309,6 +309,65 @@ test_adopt_refuses_secrets() {
   [[ ! -e "$cfg/dot_config/app" ]] || fail "secret directory was adopted"
 }
 
+test_adopt_config_from_another_machine() {
+  selected_mac
+  new_fixture other omarchy linux
+  local there="$data/machines/other/config"
+  mkdir -p "$there/private_dot_config/example/sub" "$there/exact_dot_tool"
+  printf 'a\n' >"$there/private_dot_config/example/a.toml"
+  printf 'b\n' >"$there/private_dot_config/example/sub/executable_b.sh"
+  printf 'x\n' >"$there/encrypted_dot_secret.age"
+  printf 't\n' >"$there/dot_tmpl.tmpl"
+  printf 'q\n' >"$there/exact_dot_tool/q"
+  # This machine already manages ~/.config without private_.
+  mkdir -p "$cfg/dot_config"
+  printf 'k\n' >"$cfg/dot_config/kept"
+
+  run_envmgr adopt config --from other "$HOME/.config/example"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Copied ~/.config/example/a.toml"
+  assert_contains "$out" "envmgr save"
+  assert_eq "$(cat "$cfg/dot_config/example/a.toml")" a
+  [[ -f "$cfg/dot_config/example/sub/executable_b.sh" ]] || fail "attributes not kept"
+  [[ ! -e "$cfg/private_dot_config" ]] || fail "created a second source for ~/.config"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$HOME/.config/example/a.toml")" a
+  [[ -x "$HOME/.config/example/sub/b.sh" ]] || fail "b.sh is not executable"
+
+  run_envmgr adopt config --from other "$HOME/.tmpl" "$HOME/.secret"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "dot_tmpl.tmpl is a template"
+  assert_contains "$out" "age.key"
+  [[ -f "$cfg/encrypted_dot_secret.age" ]] || fail "encrypted source not copied"
+
+  # Existing config is refused in favour of evaluate --from.
+  run_envmgr adopt config --from other "$HOME/.config/example"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "already exist on this machine"
+  assert_contains "$out" "envmgr evaluate --from other ~/.config/example"
+  printf 'mine\n' >"$there/dot_localrc"
+  printf 'unmanaged\n' >"$HOME/.localrc"
+  run_envmgr adopt config --from other "$HOME/.localrc"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "~/.localrc"
+  [[ ! -e "$cfg/dot_localrc" ]] || fail "copied over an existing target"
+  mkdir -p "$HOME/.tool"
+  run_envmgr adopt config --from other "$HOME/.tool/q"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "is an exact directory on other"
+
+  run_envmgr adopt config --from other "$HOME/.missing"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "~/.missing is not managed on other"
+  run_envmgr adopt config --from nowhere "$HOME/.x"
+  assert_eq "$rc" 1 "$out"
+  run_envmgr adopt config --from mac "$HOME/.x"
+  assert_eq "$rc" 2 "$out"
+  run_envmgr adopt config --from other --encrypt "$HOME/.x"
+  assert_eq "$rc" 2 "$out"
+}
+
 test_adopt_refuses_partially_managed_target() {
   selected_mac
   printf '#!/bin/sh\ncat\n' >"$cfg/modify_dot_bashrc"
@@ -1095,6 +1154,89 @@ test_evaluate_starts_agent() {
 
   FAKE_AGENT_RC=7 run_envmgr evaluate
   assert_eq "$rc" 7 "$out"
+}
+
+test_evaluate_from_compares_machines() {
+  data_checkout
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  make_agent
+  printf 'agent=%s\n' "$work/bin/agent" >>"$HOME/.config/envmgr/config"
+  local mac="$data/machines/mac/config"
+  printf 'same\n' >"$mac/dot_same"
+  printf 'mine\n' >"$mac/dot_diff"
+  git -C "$data" add -A
+  git -C "$data" commit -qm mac
+  git -C "$data" push -q origin main
+
+  # Another machine pushes its config; evaluate pulls it first.
+  git clone -q "$data_origin" "$work/second"
+  local other="$work/second/machines/other/config"
+  mkdir -p "$other/private_dot_config/example"
+  printf 'example-content\n' >"$other/private_dot_config/example/a.toml"
+  printf 'only\n' >"$other/dot_onlythere"
+  printf 'same\n' >"$other/dot_same"
+  printf 'theirs\n' >"$other/dot_diff"
+  printf 'x\n' >"$other/encrypted_dot_secret.age"
+  git -C "$work/second" add -A
+  git -C "$work/second" commit -qm other
+  git -C "$work/second" push -q origin main
+
+  run_envmgr evaluate --from other
+  assert_eq "$rc" 0 "$out"
+  [[ -f "$data/machines/other/config/dot_onlythere" ]] || fail "did not pull the data checkout"
+  assert_contains "$out" "only there  .config/example/a.toml"
+  assert_contains "$out" "there: machines/other/config/private_dot_config/example/a.toml"
+  assert_contains "$out" "only there  .onlythere"
+  assert_contains "$out" "different   .diff"
+  assert_contains "$out" "here:  machines/mac/config/dot_diff"
+  assert_contains "$out" "only here   .x"
+  assert_contains "$out" "encrypted_dot_secret.age"
+  [[ "$out" != *".same"* ]] || fail "listed an identical source"
+  assert_eq "$(cat "$work/agent.dir")" in-data
+  local args=""
+  args="$(cat "$work/agent.args")"
+  assert_contains "$args" 'from the envmgr machine "other"'
+  assert_contains "$args" 'machine "mac", which is this machine'
+  assert_contains "$args" "machines/other/machine.conf"
+  assert_contains "$args" "only there  .onlythere"
+  assert_contains "$args" "is missing on this machine"
+  assert_contains "$args" "edit only files under"
+  assert_contains "$args" "envmgr save."
+  [[ "$args" != *example-content* ]] || fail "prompt includes source contents"
+
+  # Targets narrow the comparison; with nothing to copy, no agent starts.
+  run_envmgr evaluate --from other "$HOME/.config/example"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" ".config/example/a.toml"
+  [[ "$out" != *onlythere* ]] || fail "did not narrow to the target"
+  rm -f "$work/agent.args"
+  run_envmgr evaluate --from other "$HOME/.same"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "nothing to copy from other"
+  [[ ! -f "$work/agent.args" ]] || fail "started the agent with nothing to copy"
+
+  # A checkout with local changes is compared as it is, and --offline
+  # skips the fetch.
+  printf 'later\n' >"$other/dot_later"
+  git -C "$work/second" add -A
+  git -C "$work/second" commit -qm later
+  git -C "$work/second" push -q origin main
+  run_envmgr evaluate --from other --offline
+  assert_eq "$rc" 0 "$out"
+  [[ "$out" != *.later* ]] || fail "--offline updated the checkout"
+  printf 'dirty\n' >>"$mac/dot_diff"
+  run_envmgr evaluate --from other
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "not updating the data checkout (uncommitted changes)"
+  [[ "$out" != *.later* ]] || fail "updated a dirty checkout"
+
+  run_envmgr evaluate --from mac
+  assert_eq "$rc" 2 "$out"
+  run_envmgr evaluate --from nowhere
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "machine does not exist: nowhere"
+  run_envmgr evaluate config system
+  assert_eq "$rc" 2 "$out"
 }
 
 # Clone a data origin into $data with one machine selected and a git

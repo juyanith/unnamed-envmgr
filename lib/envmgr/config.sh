@@ -319,6 +319,139 @@ envmgr_adopt_config() {
   done
 }
 
+# Print "target<TAB>source" for each file or symlink a machine manages, with
+# sources as machines/<id>/config/... paths.
+envmgr_config_sources() {
+  local machine_dir="$1"
+  local id=""
+  local managed=""
+  local paths=""
+  local target=""
+  local absolute=()
+
+  id="$(basename -- "$machine_dir")"
+  [[ -d "$machine_dir/config" ]] || return 0
+  managed="$(envmgr_chezmoi "$machine_dir" managed --include files,symlinks \
+    --path-style relative)" || return 1
+  [[ -n "$managed" ]] || return 0
+  while IFS= read -r target; do
+    absolute+=("$HOME/$target")
+  done <<<"$managed"
+  paths="$(envmgr_chezmoi "$machine_dir" source-path "${absolute[@]}")" || return 1
+  paste <(printf '%s\n' "$managed") \
+    <(printf '%s\n' "$paths" | sed "s|^.*/machines/$id/config/|machines/$id/config/|")
+}
+
+# Copy the config sources for targets that machine from_dir manages into this
+# machine's config/ directory. Refuses when any of those targets is already
+# managed here or exists in $HOME; evaluate --from handles those.
+envmgr_adopt_config_from() {
+  local machine_dir="$1"
+  local from_dir="$2"
+  local from=""
+  local target=""
+  local rel=""
+  local listing=""
+  local line=""
+  local file=""
+  local source=""
+  local prefix=""
+  local rest=""
+  local ancestor=""
+  local dest=""
+  local part=""
+  local k=0
+  local depth=0
+  local parts=()
+  local tparts=()
+  local files=()
+  local conflicts=()
+  local templates=()
+  local encrypted=false
+
+  shift 2
+  from="$(basename -- "$from_dir")"
+  listing="$(envmgr_config_sources "$from_dir")" || return 1
+  for target in "$@"; do
+    rel="${target#"$HOME"/}"
+    line="$(awk -F '\t' -v t="$rel" '$1 == t || index($1, t "/") == 1' <<<"$listing")"
+    [[ -n "$line" ]] || envmgr_die 1 "$(envmgr_display_path "$target") is not managed on $from"
+    files+=("$line")
+  done
+
+  for line in "${files[@]}"; do
+    while IFS=$'\t' read -r rel source; do
+      if [[ -e "$HOME/$rel" || -L "$HOME/$rel" ]] || \
+        envmgr_config_is_managed "$machine_dir" "$HOME/$rel"; then
+        conflicts+=("$(envmgr_display_path "$HOME/$rel")")
+      fi
+    done <<<"$line"
+  done
+  if ((${#conflicts[@]})); then
+    printf 'envmgr: error: these targets already exist on this machine:\n' >&2
+    printf '  %s\n' "${conflicts[@]}" >&2
+    printf 'Use envmgr evaluate --from %s' "$from" >&2
+    for target in "$@"; do
+      printf ' %s' "$(envmgr_display_path "$target")" >&2
+    done
+    printf ' to copy or merge them.\n' >&2
+    exit 1
+  fi
+
+  for line in "${files[@]}"; do
+    while IFS=$'\t' read -r rel source; do
+      source="${source#machines/"$from"/config/}"
+      # A source path has one component per target component. Reuse this
+      # machine's source directory for the deepest managed ancestor, so
+      # attributes such as private_ on existing directories are kept.
+      IFS=/ read -r -a parts <<<"$source"
+      IFS=/ read -r -a tparts <<<"$rel"
+      depth=${#parts[@]}
+      prefix=""
+      k=$((depth - 1))
+      while ((k > 0)); do
+        ancestor="$(IFS=/; printf '%s' "${tparts[*]:0:k}")"
+        if prefix="$(envmgr_chezmoi "$machine_dir" source-path "$HOME/$ancestor" 2>/dev/null)"; then
+          prefix="${prefix#"$machine_dir"/config/}"
+          [[ "$prefix" != /* ]] || prefix="${prefix#*/machines/*/config/}"
+          break
+        fi
+        prefix=""
+        k=$((k - 1))
+      done
+      rest="$(IFS=/; printf '%s' "${parts[*]:k}")"
+      dest="${prefix:+$prefix/}$rest"
+      # A new exact_ directory deletes unmanaged files in it on restore.
+      while ((k < depth - 1)); do
+        part="${parts[k]}"
+        ancestor="$(IFS=/; printf '%s' "${tparts[*]:0:k+1}")"
+        if [[ "$part" == exact_* && -d "$HOME/$ancestor" ]]; then
+          envmgr_die 1 "$(envmgr_display_path "$HOME/$ancestor") exists here and is an exact directory on $from; use envmgr evaluate --from $from"
+        fi
+        k=$((k + 1))
+      done
+      file="$machine_dir/config/$dest"
+      mkdir -p -- "$(dirname -- "$file")"
+      cp -p -- "$from_dir/config/$source" "$file" || return 1
+      case "${parts[depth - 1]}" in
+        *.tmpl) templates+=("$dest") ;;
+      esac
+      case "${parts[depth - 1]}" in
+        encrypted_*) encrypted=true ;;
+      esac
+      printf 'Copied %s\n' "$(envmgr_display_path "$HOME/$rel")"
+    done <<<"$line"
+  done
+
+  for file in ${templates[@]+"${templates[@]}"}; do
+    envmgr_warn "$file is a template; check that the files it references exist in this machine's config"
+  done
+  if [[ "$encrypted" == true && ! -f "$(envmgr_age_key_file)" ]]; then
+    envmgr_warn "encrypted files need ~/.config/envmgr/age.key; copy it from another machine"
+  fi
+  printf 'Adopted from %s. Run envmgr restore config --dry-run, then envmgr restore config, then envmgr save.\n' "$from"
+}
+
 envmgr_drop_config() {
   local machine_dir="$1"
   local delete="$2"

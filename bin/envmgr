@@ -59,10 +59,12 @@ usage: envmgr <command> [arguments]
   restore system [unit...] [--force] [--yes] [--dry-run]
   restore package [provider] [--yes] [--dry-run]
   adopt config [--exact] [--encrypt] target...
+  adopt config --from <machine-id> target...
   adopt package <provider> <package...>
   drop config [--delete] [--yes] [--dry-run] target...
   drop package [--delete] [--yes] [--dry-run] <provider> <package...>
   evaluate [config|system|package] [--offline]
+  evaluate --from <machine-id> [target...] [--offline]
   save [-m <message>] [--no-push] [--yes] [--dry-run]
   migrate <url> [--no-history] [--yes] [--dry-run]
   migrate --follow <url> [--yes] [--dry-run]

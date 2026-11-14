@@ -267,7 +267,9 @@ envmgr_cmd_adopt() {
   local category="${1:-}"
   local exact=false
   local encrypt=false
+  local from=""
   local machine_dir=""
+  local from_dir=""
   local targets=()
 
   [[ $# -gt 0 ]] && shift
@@ -286,15 +288,31 @@ envmgr_cmd_adopt() {
     case "$1" in
       --exact) exact=true ;;
       --encrypt) encrypt=true ;;
+      --from)
+        [[ $# -ge 2 && -n "$2" ]] || envmgr_usage_error "--from requires a machine ID"
+        envmgr_valid_machine_id "$2" || envmgr_usage_error "invalid machine ID: $2"
+        from="$2"
+        shift
+        ;;
       -*) envmgr_usage_error "unknown option for adopt config: $1" ;;
       *) targets+=("$(envmgr_absolute_target "$1")") ;;
     esac
     shift
   done
   ((${#targets[@]})) || envmgr_usage_error "adopt config requires at least one target"
+  [[ -z "$from" || ( "$exact" == false && "$encrypt" == false ) ]] || \
+    envmgr_usage_error "--from copies sources as they are; it cannot be combined with --exact or --encrypt"
 
   machine_dir="$(envmgr_active_machine_dir refuse)"
-  envmgr_adopt_config "$machine_dir" "$exact" "$encrypt" "${targets[@]}"
+  if [[ -n "$from" ]]; then
+    [[ "$from" != "$(basename -- "$machine_dir")" ]] || \
+      envmgr_usage_error "--from names the selected machine; give another machine ID"
+    from_dir="$(dirname -- "$machine_dir")/$from"
+    [[ -d "$from_dir" ]] || envmgr_die 1 "machine does not exist: $from"
+    envmgr_adopt_config_from "$machine_dir" "$from_dir" "${targets[@]}"
+  else
+    envmgr_adopt_config "$machine_dir" "$exact" "$encrypt" "${targets[@]}"
+  fi
   envmgr_refresh_checks "$machine_dir"
 }
 
