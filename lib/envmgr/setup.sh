@@ -217,11 +217,43 @@ envmgr_matching_machines() {
   done
 }
 
+# Print Chezmoi's current source directory when it exists and lies outside
+# the data repository, for example a legacy envmgr checkout.
+envmgr_foreign_chezmoi_source() {
+  local data="$1"
+  local source=""
+  local real_source=""
+  local real_data=""
+
+  command -v chezmoi >/dev/null 2>&1 || return 0
+  source="$(chezmoi source-path 2>/dev/null)" || return 0
+  [[ -n "$source" && -d "$source" ]] || return 0
+  real_source="$(cd -P -- "$source" && pwd)" || return 0
+  real_data="$(cd -P -- "$data" && pwd)" || return 0
+  case "$real_source/" in
+    "$real_data"/machines/*) ;;
+    *) envmgr_display_path "$source" ;;
+  esac
+}
+
+# Selecting a machine switches Chezmoi to it; confirm when that would leave
+# another source behind.
+envmgr_setup_confirm_switch() {
+  local foreign="$1"
+  local machine="$2"
+
+  [[ -z "$foreign" ]] && return 0
+  envmgr_ask_yes "Switch Chezmoi from $foreign to machine $machine?" && return 0
+  printf 'Chezmoi still uses %s.\n' "$foreign"
+  return 1
+}
+
 envmgr_setup_machine() {
   local data=""
   local machine=""
   local choice=""
   local from=""
+  local foreign=""
   local machines=()
   local i=0
 
@@ -242,6 +274,13 @@ envmgr_setup_machine() {
       "$(envmgr_kv_get "$data/machines/${machines[$i]}/machine.conf" description 2>/dev/null || true)"
   done
   printf '  n) new machine\n  s) skip for now\n'
+  foreign="$(envmgr_foreign_chezmoi_source "$data")"
+  if [[ -n "$foreign" ]]; then
+    printf '\nChezmoi currently uses %s. Choosing a machine switches it to\n' "$foreign"
+    printf 'that machine'\''s files, and the next restore overwrites targets that differ.\n'
+    printf 'If you are migrating from the legacy envmgr, choose s, then run\n'
+    printf 'legacy-export.sh and envmgr init <machine-id>.\n'
+  fi
 
   while true; do
     choice="$(envmgr_ask "Choose")"
@@ -252,9 +291,11 @@ envmgr_setup_machine() {
         ;;
       n|N)
         machine="$(envmgr_ask "New machine ID")"
+        from=""
         if ((${#machines[@]})); then
           from="$(envmgr_ask "Copy from (blank for an empty machine)")"
         fi
+        envmgr_setup_confirm_switch "$foreign" "$machine" || continue
         if [[ -n "$from" ]]; then
           envmgr_cmd_init --new --from "$from" "$machine"
         else
@@ -265,7 +306,9 @@ envmgr_setup_machine() {
       *[!0-9]*|"") ;;
       *)
         if ((choice >= 1 && choice <= ${#machines[@]})); then
-          envmgr_cmd_init "${machines[$((choice - 1))]}"
+          machine="${machines[$((choice - 1))]}"
+          envmgr_setup_confirm_switch "$foreign" "$machine" || continue
+          envmgr_cmd_init "$machine"
           return 0
         fi
         ;;

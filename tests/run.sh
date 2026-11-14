@@ -959,6 +959,27 @@ test_setup_requires_terminal() {
   assert_contains "$out" "needs a terminal"
 }
 
+test_setup_guards_existing_chezmoi_source() {
+  make_data_origin
+  mkdir -p "$work/legacy/home" "$HOME/.config/chezmoi"
+  printf 'sourceDir = "%s"\n' "$work/legacy/home" >"$HOME/.config/chezmoi/chezmoi.toml"
+  cp "$HOME/.config/chezmoi/chezmoi.toml" "$work/toml.before"
+
+  run_setup "$data_origin" "" 1 n s ""
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Chezmoi currently uses $work/legacy/home."
+  assert_contains "$out" "choose s"
+  assert_contains "$out" "Chezmoi still uses $work/legacy/home."
+  assert_contains "$out" "Skipped."
+  assert_eq "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" "$(cat "$work/toml.before")"
+  [[ "$(cat "$HOME/.config/envmgr/config")" != *"machine="* ]] || fail "selected a machine"
+
+  run_setup 1 y
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Selected machine mac"
+  assert_contains "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" "machines/mac/config"
+}
+
 # --- runner ----------------------------------------------------------------
 
 tests=()

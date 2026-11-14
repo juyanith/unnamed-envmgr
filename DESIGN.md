@@ -153,7 +153,9 @@ complete:
 4. **Machine.** Offer the existing machines whose `os`/`distribution` match
    the running system, a new machine (optionally copied from one of them), or
    skip (used during legacy migration). Selecting a machine runs
-   `envmgr init`.
+   `envmgr init`. When Chezmoi currently uses a source outside the data
+   repository (for example, the legacy checkout), setup says so, recommends
+   skip, and asks before switching.
 5. **Agent.** Optionally record the agent command for `evaluate`.
 
 #### `envmgr init`
