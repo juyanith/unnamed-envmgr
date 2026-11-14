@@ -45,6 +45,7 @@ machines/
   <machine-id>/
     machine.conf           # metadata
     SPEC.md                # human/agent specification for this machine
+    POSTINSTALL.md         # optional: manual steps envmgr cannot automate
     config/                # complete Chezmoi source for this machine
     packages/<provider>/   # provider manifests (see Packages)
     system/<NN-name>/      # system units (see System units)
@@ -183,7 +184,13 @@ complete:
 4. **Machine.** Offer the existing machines whose `os`/`distribution` match
    the running system, a new machine (optionally copied from one of them), or
    skip (used during legacy migration). Selecting a machine runs
-   `envmgr init`. When Chezmoi currently uses a source outside the data
+   `envmgr init`. For a new machine, setup suggests an ID made from the host
+   name (lowercased, other characters replaced by `-`) when it is free,
+   suggests copying the matching machine whose directory has the latest
+   commit (`none` starts empty), and asks for the `description`.
+   Machines on another OS are never offered; a first machine on a new OS
+   starts empty and is built up carefully with `adopt` and
+   `evaluate --from`. When Chezmoi currently uses a source outside the data
    repository (for example, the legacy checkout), setup says so, recommends
    skip, and asks before switching.
 5. **Age key.** When the selected machine has `encrypted_` files and
@@ -207,6 +214,9 @@ complete:
    again. When the `git` provider pulls new code, restore re-executes
    `envmgr setup`, which continues to restore without asking again.
 
+9. **Manual steps.** Print the machine's `POSTINSTALL.md`, if present: the
+   steps envmgr cannot automate, such as App Store sign-in or privacy grants.
+
 Yes/no questions whose usual answer is yes (save, restore) default to yes.
 
 #### `envmgr init`
@@ -219,8 +229,9 @@ Yes/no questions whose usual answer is yes (save, restore) default to yes.
   did not clone.
 - `init --new <id> [--from <id>]` creates `machines/<id>/` with detected
   metadata and an empty `config/`, `packages/`, `system/`, and `SPEC.md`.
-  With `--from`, it copies those directories from another machine with the
-  same `os` and `distribution`. Copies are owned independently from then on.
+  With `--from`, it copies those, and `POSTINSTALL.md`, from another
+  machine with the same `os` and `distribution`. Copies are owned
+  independently from then on.
   The new machine is then selected as with `init <id>`.
 
 #### `envmgr migrate`
@@ -484,8 +495,8 @@ repository root, with one appended argument: the initial prompt. The command
 is split on whitespace (quotes are not interpreted), and `evaluate` exits
 with the agent's exit code. The prompt contains:
 
-- the machine ID and the paths to `machine.conf`, `SPEC.md`, the data
-  repository's `AGENTS.md`, and this `DESIGN.md`;
+- the machine ID and the paths to `machine.conf`, `SPEC.md`,
+  `POSTINSTALL.md`, the data repository's `AGENTS.md`, and this `DESIGN.md`;
 - current `check` output for the selected categories, as paths and statuses,
   never file contents;
 - the approval boundary: the agent may edit `machines/<id>/` and repository

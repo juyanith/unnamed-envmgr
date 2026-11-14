@@ -976,8 +976,9 @@ test_setup_clones_and_selects_machine() {
 test_setup_new_machine_and_skip() {
   make_data_origin
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
-  run_setup "$data_origin" "" bogus n laptop mac "" "" n
+  run_setup "$data_origin" "" bogus n laptop mac "Test laptop" "" "" n
   assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$HOME/Work/Git/envmgr-data/machines/laptop/machine.conf")" "description=Test laptop"
   assert_contains "$out" "Enter a number, n, or s."
   assert_contains "$out" "Created machine laptop from mac."
   assert_contains "$out" "save: pushed to origin/main"
@@ -1085,6 +1086,32 @@ test_setup_restore_stops_for_reboot() {
   assert_eq "$rc" 75 "$out"
   assert_contains "$out" "run envmgr setup again to continue"
   [[ "$out" != *"Setup is complete."* ]] || fail "setup claimed to be complete"
+}
+
+test_setup_suggests_new_machine_defaults() {
+  make_data_origin
+  git clone -q "$data_origin" "$work/seed2"
+  printf -- '- Sign in to the App Store.\n' >"$work/seed2/machines/mac/POSTINSTALL.md"
+  git -C "$work/seed2" add -A
+  git -C "$work/seed2" -c user.name=t -c user.email=t@t commit -qm post
+  git -C "$work/seed2" push -q origin main
+  export FAKE_STATE="$work/fake"
+  mkdir -p "$FAKE_STATE"
+  export PATH="$root/tests/fakes-setup:$PATH"
+
+  run_setup "$data_origin" "" n "Bad ID!" mac "" nope "" "Office Mac" "" n n
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "New machine ID [test-mac]"
+  assert_contains "$out" "Use letters, digits"
+  assert_contains "$out" "Machine mac already exists"
+  assert_contains "$out" "Copy from (none for an empty machine) [mac]"
+  assert_contains "$out" "Enter one of: mac, or none."
+  assert_contains "$out" "Created machine test-mac from mac."
+  local dir="$HOME/Work/Git/envmgr-data/machines/test-mac"
+  assert_contains "$(cat "$dir/machine.conf")" "description=Office Mac"
+  [[ -f "$dir/POSTINSTALL.md" ]] || fail "POSTINSTALL.md not copied"
+  assert_contains "$out" "== Manual steps"
+  assert_contains "$out" "- Sign in to the App Store."
 }
 
 test_setup_requires_terminal() {

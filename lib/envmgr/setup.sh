@@ -266,6 +266,64 @@ envmgr_foreign_chezmoi_source() {
   esac
 }
 
+# Ask for a new machine ID, suggesting one from the host name. Prompts and
+# messages go to stderr, because the caller captures the ID.
+envmgr_setup_new_id() {
+  local data="$1"
+  local suggested=""
+  local id=""
+
+  suggested="$( (hostname -s 2>/dev/null || hostname) | tr '[:upper:]' '[:lower:]' | \
+    sed 's/[^a-z0-9._-]/-/g; s/^[^a-z0-9]*//')"
+  if ! envmgr_valid_machine_id "$suggested" || [[ -e "$data/machines/$suggested" ]]; then
+    suggested=""
+  fi
+  while true; do
+    id="$(envmgr_ask "New machine ID" "$suggested")"
+    if ! envmgr_valid_machine_id "$id"; then
+      printf 'Use letters, digits, dots, dashes, and underscores.\n' >&2
+    elif [[ -e "$data/machines/$id" ]]; then
+      printf 'Machine %s already exists; choose it from the list, or pick another ID.\n' "$id" >&2
+    else
+      printf '%s\n' "$id"
+      return 0
+    fi
+  done
+}
+
+# Ask which matching machine a new one copies, suggesting the one changed
+# most recently. Prints nothing for an empty machine.
+envmgr_setup_copy_from() {
+  local data="$1"
+  local machine=""
+  local from=""
+  local suggested=""
+  local time=0
+  local latest=-1
+
+  shift
+  for machine in "$@"; do
+    time="$(git -C "$data" log -1 --format=%ct -- "machines/$machine" 2>/dev/null)" || time=0
+    if ((${time:-0} > latest)); then
+      latest="${time:-0}"
+      suggested="$machine"
+    fi
+  done
+  while true; do
+    from="$(envmgr_ask "Copy from (none for an empty machine)" "$suggested")"
+    case "$from" in
+      ""|none) return 0 ;;
+    esac
+    for machine in "$@"; do
+      if [[ "$from" == "$machine" ]]; then
+        printf '%s\n' "$from"
+        return 0
+      fi
+    done
+    printf 'Enter one of: %s, or none.\n' "$*" >&2
+  done
+}
+
 # Selecting a machine switches Chezmoi to it; confirm when that would leave
 # another source behind.
 envmgr_setup_confirm_switch() {
@@ -283,6 +341,7 @@ envmgr_setup_machine() {
   local machine=""
   local choice=""
   local from=""
+  local description=""
   local foreign=""
   local machines=()
   local i=0
@@ -320,17 +379,20 @@ envmgr_setup_machine() {
         return 0
         ;;
       n|N)
-        machine="$(envmgr_ask "New machine ID")"
+        machine="$(envmgr_setup_new_id "$data")"
         from=""
         if ((${#machines[@]})); then
-          from="$(envmgr_ask "Copy from (blank for an empty machine)")"
+          from="$(envmgr_setup_copy_from "$data" "${machines[@]}")"
         fi
+        description="$(envmgr_ask "Description (for example, Mac mini in the office)")"
         envmgr_setup_confirm_switch "$foreign" "$machine" || continue
         if [[ -n "$from" ]]; then
           envmgr_cmd_init --new --from "$from" "$machine"
         else
           envmgr_cmd_init --new "$machine"
         fi
+        [[ -z "$description" ]] || \
+          envmgr_kv_set "$data/machines/$machine/machine.conf" description "$description"
         return 0
         ;;
       *[!0-9]*|"") ;;
@@ -494,6 +556,18 @@ envmgr_setup_restore() {
   esac
 }
 
+# Print the machine's manual steps, the ones envmgr cannot automate.
+envmgr_setup_postinstall() {
+  local machine=""
+  local file=""
+
+  machine="$(envmgr_kv_get "$(envmgr_local_config_file)" machine 2>/dev/null)" || return 0
+  file="$(envmgr_data_dir)/machines/$machine/POSTINSTALL.md"
+  [[ -f "$file" ]] || return 0
+  envmgr_setup_step "Manual steps"
+  cat -- "$file"
+}
+
 envmgr_cmd_setup() {
   [[ $# -eq 0 ]] || envmgr_usage_error "setup takes no arguments"
   envmgr_detect_platform
@@ -505,6 +579,7 @@ envmgr_cmd_setup() {
   envmgr_setup_agent
   envmgr_setup_save
   envmgr_setup_restore
+  envmgr_setup_postinstall
   exec 3<&-
   printf '\nSetup is complete.\n'
 }

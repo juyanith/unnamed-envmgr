@@ -16,6 +16,8 @@ directory is the envmgr data repository.
 Read these first:
 - machines/$machine/machine.conf (machine metadata)
 - machines/$machine/SPEC.md (what this machine should have)
+- machines/$machine/POSTINSTALL.md (manual steps envmgr cannot automate), if
+  present
 - AGENTS.md (configuration rules for this repository), if present
 - $ENVMGR_ROOT/DESIGN.md (how envmgr works: config, packages, system units)
 

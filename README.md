@@ -45,8 +45,10 @@ steps. It:
    until GitHub accepts the key. `gh` is not needed.
 3. Clones the data repository (default
    `git@github.com:juyanith/envmgr-data.git` into `~/Work/Git/envmgr-data`).
-4. Selects this machine from the data repository, creates a new one
-   (optionally copied from an existing machine), or skips.
+4. Selects this machine from the data repository, creates a new one, or
+   skips. A new machine's ID defaults to the host name, and it is copied
+   from the matching machine changed most recently unless you choose another
+   one or `none`.
 5. If the machine has encrypted files and no age key, lets you paste the key
    (for example, from a password manager), checks that it decrypts the
    machine's files, and saves it as `~/.config/envmgr/age.key`. Or press
@@ -55,6 +57,8 @@ steps. It:
 7. Offers to commit and push a new or changed machine with `envmgr save`.
 8. Offers to run `envmgr restore`, which previews and confirms packages, then
    config, then system units.
+9. Prints the machine's `POSTINSTALL.md`, if it has one: manual steps such as
+   signing in to the App Store or granting privacy permissions.
 
 When restore needs a reboot or re-login (exit `75`), or stops on an error,
 setup says so; run `envmgr setup` again afterward and it continues where it
