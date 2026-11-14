@@ -4,6 +4,9 @@ Envmgr restores a machine's configuration files, packages, and system setup
 from a private data repository, and reports when the machine has drifted from
 it. See [DESIGN.md](DESIGN.md) for the full specification.
 
+> [!WARNING]
+> **Work in progress.** Envmgr is still being built. Commands, options, and the data repository layout can change or break between versions. Envmgr changes files, packages, and system settings, so preview with `--dry-run` and keep backups. If you choose to use it, you do so at your own risk: it comes as is, with no warranty of any kind.
+
 **Status:** ready for testing. Implemented: `setup`, `init`, `check`,
 `list`, `restore`, `adopt`, `drop`, system units, and the `git`, `homebrew`,
 `omarchy`, `flatpak`, and `rpm-ostree` providers. Not implemented yet:
