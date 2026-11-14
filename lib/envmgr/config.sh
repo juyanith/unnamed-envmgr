@@ -31,8 +31,11 @@ envmgr_chezmoi_config_text() {
   key="$(envmgr_age_key_file)"
   printf '# Managed by envmgr; changed by envmgr init.\n'
   printf 'sourceDir = "%s"\n' "$machine_dir/config"
+  # Set even without a key: Chezmoi then still maps encrypted_ sources to
+  # their targets, so they can be listed and dropped after a key is lost.
+  printf 'encryption = "age"\n'
   [[ -r "$key" ]] || return 0
-  printf 'encryption = "age"\n\n[age]\n'
+  printf '\n[age]\n'
   printf '  identity = "%s"\n' "$key"
   printf '  recipient = "%s"\n' "$(envmgr_age_recipient "$key")"
 }
@@ -295,7 +298,7 @@ envmgr_adopt_config() {
   if [[ "$encrypt" == true ]]; then
     envmgr_create_age_key
     envmgr_config_prepare "$machine_dir" || return 1
-    grep -Fq 'encryption = "age"' "$(envmgr_config_home)/chezmoi/chezmoi.toml" 2>/dev/null || \
+    grep -Fq '[age]' "$(envmgr_config_home)/chezmoi/chezmoi.toml" 2>/dev/null || \
       envmgr_die 1 "chezmoi.toml is not managed by envmgr; run envmgr init $(basename -- "$machine_dir") first"
     add_args+=(--encrypt)
   fi

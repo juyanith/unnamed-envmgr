@@ -1029,13 +1029,27 @@ test_encrypted_files_need_the_key() {
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "the age key is missing"
 
+  # Without the key, encrypted targets keep their names and can be dropped.
+  run_envmgr list config
+  assert_contains "$out" "encrypted  .netrc"
+  [[ "$out" != *".netrc.age"* ]] || fail "target lost its name"
+  cp -R "$cfg" "$work/cfg.keep"
+  cp "$HOME/.netrc" "$work/netrc.keep"
+  run_envmgr drop config --delete --yes "$HOME/.netrc"
+  assert_eq "$rc" 0 "$out"
+  [[ ! -e "$HOME/.netrc" ]] || fail "target not deleted"
+  run_envmgr check config
+  assert_eq "$rc" 0 "$out"
+  rm -rf "$cfg" && mv "$work/cfg.keep" "$cfg"
+  mv "$work/netrc.keep" "$HOME/.netrc"
+
   # Once the key is copied in, envmgr adds the age settings to chezmoi.toml.
   printf '# Managed by envmgr; changed by envmgr init.\nsourceDir = "%s"\n' "$cfg" \
     >"$HOME/.config/chezmoi/chezmoi.toml"
   mv "$work/age.key" "$HOME/.config/envmgr/age.key"
   run_envmgr check config
   assert_eq "$rc" 0 "$out"
-  assert_contains "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" 'encryption = "age"'
+  assert_contains "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" '[age]'
 }
 
 # Agent stand-in: records its directory and arguments.

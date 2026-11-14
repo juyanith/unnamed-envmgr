@@ -375,8 +375,11 @@ with the agent's exit code. The prompt contains:
   age-keygen` when it is missing, and asks the user to back it up and copy
   it to every machine that restores the encrypted files. Chezmoi's built-in
   age is used, so no `age` binary is needed.
-- When the key exists, the envmgr-managed `chezmoi.toml` also sets
-  `encryption = "age"` and the `[age]` identity and recipient. Before any
+- The envmgr-managed `chezmoi.toml` always sets `encryption = "age"`, so
+  encrypted targets keep their names even without a key: after a key is
+  lost, `list config` shows them and `drop config [--delete]` removes them,
+  after which `check` and `restore` work again. When the key exists, it also
+  sets the `[age]` identity and recipient. Before any
   command that decrypts (`check config`, `restore config`, `adopt config
   --encrypt`), envmgr adds those settings if the key was copied in after
   `init`, and fails with instructions if the machine has `encrypted_` files
