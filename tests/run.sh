@@ -309,6 +309,65 @@ test_adopt_refuses_secrets() {
   [[ ! -e "$cfg/dot_config/app" ]] || fail "secret directory was adopted"
 }
 
+test_adopt_config_from_another_machine() {
+  selected_mac
+  new_fixture other omarchy linux
+  local there="$data/machines/other/config"
+  mkdir -p "$there/private_dot_config/example/sub" "$there/exact_dot_tool"
+  printf 'a\n' >"$there/private_dot_config/example/a.toml"
+  printf 'b\n' >"$there/private_dot_config/example/sub/executable_b.sh"
+  printf 'x\n' >"$there/encrypted_dot_secret.age"
+  printf 't\n' >"$there/dot_tmpl.tmpl"
+  printf 'q\n' >"$there/exact_dot_tool/q"
+  # This machine already manages ~/.config without private_.
+  mkdir -p "$cfg/dot_config"
+  printf 'k\n' >"$cfg/dot_config/kept"
+
+  run_envmgr adopt config --from other "$HOME/.config/example"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Copied ~/.config/example/a.toml"
+  assert_contains "$out" "envmgr save"
+  assert_eq "$(cat "$cfg/dot_config/example/a.toml")" a
+  [[ -f "$cfg/dot_config/example/sub/executable_b.sh" ]] || fail "attributes not kept"
+  [[ ! -e "$cfg/private_dot_config" ]] || fail "created a second source for ~/.config"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$HOME/.config/example/a.toml")" a
+  [[ -x "$HOME/.config/example/sub/b.sh" ]] || fail "b.sh is not executable"
+
+  run_envmgr adopt config --from other "$HOME/.tmpl" "$HOME/.secret"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "dot_tmpl.tmpl is a template"
+  assert_contains "$out" "age.key"
+  [[ -f "$cfg/encrypted_dot_secret.age" ]] || fail "encrypted source not copied"
+
+  # Existing config is refused in favour of evaluate --from.
+  run_envmgr adopt config --from other "$HOME/.config/example"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "already exist on this machine"
+  assert_contains "$out" "envmgr evaluate --from other ~/.config/example"
+  printf 'mine\n' >"$there/dot_localrc"
+  printf 'unmanaged\n' >"$HOME/.localrc"
+  run_envmgr adopt config --from other "$HOME/.localrc"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "~/.localrc"
+  [[ ! -e "$cfg/dot_localrc" ]] || fail "copied over an existing target"
+  mkdir -p "$HOME/.tool"
+  run_envmgr adopt config --from other "$HOME/.tool/q"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "is an exact directory on other"
+
+  run_envmgr adopt config --from other "$HOME/.missing"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "~/.missing is not managed on other"
+  run_envmgr adopt config --from nowhere "$HOME/.x"
+  assert_eq "$rc" 1 "$out"
+  run_envmgr adopt config --from mac "$HOME/.x"
+  assert_eq "$rc" 2 "$out"
+  run_envmgr adopt config --from other --encrypt "$HOME/.x"
+  assert_eq "$rc" 2 "$out"
+}
+
 test_adopt_refuses_partially_managed_target() {
   selected_mac
   printf '#!/bin/sh\ncat\n' >"$cfg/modify_dot_bashrc"

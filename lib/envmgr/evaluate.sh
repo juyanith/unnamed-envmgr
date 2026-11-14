@@ -62,29 +62,6 @@ envmgr_evaluate_update_data() {
     envmgr_warn "could not fast-forward the data checkout; comparing the files already there"
 }
 
-# Print "target<TAB>source" for each file or symlink a machine manages, with
-# sources as machines/<id>/config/... paths.
-envmgr_evaluate_sources() {
-  local machine_dir="$1"
-  local id=""
-  local managed=""
-  local sources=""
-  local target=""
-  local absolute=()
-
-  id="$(basename -- "$machine_dir")"
-  [[ -d "$machine_dir/config" ]] || return 0
-  managed="$(envmgr_chezmoi "$machine_dir" managed --include files,symlinks \
-    --path-style relative)" || return 1
-  [[ -n "$managed" ]] || return 0
-  while IFS= read -r target; do
-    absolute+=("$HOME/$target")
-  done <<<"$managed"
-  sources="$(envmgr_chezmoi "$machine_dir" source-path "${absolute[@]}")" || return 1
-  paste <(printf '%s\n' "$managed") \
-    <(printf '%s\n' "$sources" | sed "s|^.*/machines/$id/config/|machines/$id/config/|")
-}
-
 # Compare two machines' config sources by target. Prints each target that is
 # managed on one side only, or whose sources differ in name or content, with
 # the source on each side. Remaining arguments are paths relative to $HOME
@@ -105,8 +82,8 @@ envmgr_evaluate_compare() {
   shift 3
   there="$(mktemp "${TMPDIR:-/tmp}/envmgr-there.XXXXXX")"
   here="$(mktemp "${TMPDIR:-/tmp}/envmgr-here.XXXXXX")"
-  envmgr_evaluate_sources "$from_dir" >"$there" || rc=1
-  envmgr_evaluate_sources "$machine_dir" >"$here" || rc=1
+  envmgr_config_sources "$from_dir" >"$there" || rc=1
+  envmgr_config_sources "$machine_dir" >"$here" || rc=1
   if [[ "$rc" -ne 0 ]]; then
     rm -f -- "$there" "$here"
     return 1

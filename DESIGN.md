@@ -96,7 +96,7 @@ envmgr init <id> | init --new <id> [--from <id>]
 envmgr check   [config|package|system]
 envmgr list    [config|package|system]
 envmgr restore [config|package|system] [...]
-envmgr adopt   config|package ...
+envmgr adopt   config|package ... | adopt config --from <id> target...
 envmgr drop    config|package ...
 envmgr evaluate [config|package|system] | evaluate --from <id> [target...]
 envmgr migrate [--no-history] <url> | migrate --follow <url>
@@ -282,6 +282,18 @@ Commands:
   it; later files are not managed until adopted. `--exact` warns that
   unmanaged files will be deleted on restore. Partial ownership is authored
   as a `modify_` source, not adopted.
+- **`adopt config --from <id> target...`** copies the sources that machine
+  `<id>` has for the targets (every managed file at or under each one) into
+  this machine's `config/`, with their names unchanged, so attributes carry
+  over. Where this machine already has a source directory for an ancestor
+  (for example `dot_config/` while the other machine has
+  `private_dot_config/`), the file goes under the existing one. It refuses,
+  and points to `envmgr evaluate --from <id> target...`, when any of the
+  targets is already managed here or exists in `$HOME`, or when it would
+  create an `exact_` directory whose target already exists. It does not
+  restore or commit; it warns about copied templates (whose references must
+  exist here) and about encrypted files when the age key is missing. It
+  cannot be combined with `--exact` or `--encrypt`.
 - **`drop config [--delete] target...`** runs `chezmoi forget`, which keeps
   local copies. With `--delete`, after confirmation, envmgr also deletes the
   managed files and then any managed directories left empty. Unmanaged files
@@ -418,7 +430,8 @@ with the agent's exit code. The prompt contains:
   commit.
 
 `evaluate --from <id> [target...] [--offline]` starts the agent to copy
-configuration from another machine to the selected one. Run it on the machine
+configuration from another machine to the selected one. (When none of the
+targets exist here yet, `adopt config --from` copies them without an agent.) Run it on the machine
 that receives the files, so the agent can look at the targets that already
 exist there and `envmgr save` commits the right directory afterward.
 
@@ -504,4 +517,5 @@ exist there and `envmgr save` commits the right directory afterward.
 | 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand; setup never generates one | 2026-11-14 |
 | 18 | `migrate --no-history` pushes one root commit; checkouts that cannot follow are renamed and re-cloned, never deleted | 2026-11-14 |
 | 19 | `save` commits only the active machine's directory and pushes it, rebasing onto `origin` when the local commits stay inside that directory; envmgr otherwise never commits | 2026-11-14 |
-| 20 | Copying configuration between machines goes through `evaluate --from`, run on the receiving machine, with a deterministic comparison in the prompt; there is no separate copy command | 2026-11-14 |
+| 20 | Copying configuration between machines that needs judgement (existing targets, merges) goes through `evaluate --from`, run on the receiving machine, with a deterministic comparison in the prompt | 2026-11-14 |
+| 21 | `adopt config --from` copies sources only for targets that do not exist on this machine; anything else is sent to `evaluate --from` | 2026-11-14 |
