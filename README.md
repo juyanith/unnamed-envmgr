@@ -61,6 +61,7 @@ envmgr adopt config ~/.config/example    # start managing a file or directory
 envmgr save                              # commit this machine's changes and push them
 envmgr adopt config --encrypt ~/.netrc   # secrets: stored only as age ciphertext
 envmgr evaluate [config|package|system]  # start the agent with the current check
+envmgr evaluate --from <machine-id>      # start the agent to copy config from another machine
 envmgr migrate <url>                     # move envmgr-data to a new, empty remote
 envmgr migrate --no-history <url>        # or move a clean copy of its current files
 envmgr migrate --follow <url>            # then, on every other machine

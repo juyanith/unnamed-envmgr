@@ -15,15 +15,16 @@ envmgr_save_git_path() {
   printf '%s\n' "$path"
 }
 
-# Print the branch the active machine's git provider entry tracks for the
-# data checkout, or main when there is no entry.
-envmgr_save_branch() {
-  local machine_dir="$1"
+# Print the branch the machine's git provider entry tracks for the data
+# checkout, or main when there is no entry.
+envmgr_data_branch() {
+  local data="$1"
+  local machine_dir="$2"
   local data_real=""
   local path=""
   local branch=""
 
-  data_real="$(cd -P -- "$ENVMGR_SAVE_DATA" && pwd)"
+  data_real="$(cd -P -- "$data" && pwd)"
   while IFS=$'\t' read -r _ path branch; do
     path="$(envmgr_expand_path "$path")"
     [[ -d "$path" ]] || continue
@@ -162,7 +163,7 @@ envmgr_cmd_save() {
   envmgr_git_save remote get-url origin >/dev/null 2>&1 || \
     envmgr_die 1 "the data repository has no origin remote"
 
-  branch="$(envmgr_save_branch "$machine_dir")"
+  branch="$(envmgr_data_branch "$ENVMGR_SAVE_DATA" "$machine_dir")"
   current="$(envmgr_git_save branch --show-current)"
   [[ "$current" == "$branch" ]] || \
     envmgr_die 1 "the data checkout is on branch ${current:-(detached)}, expected $branch"

@@ -98,7 +98,7 @@ envmgr list    [config|package|system]
 envmgr restore [config|package|system] [...]
 envmgr adopt   config|package ...
 envmgr drop    config|package ...
-envmgr evaluate [config|package|system]
+envmgr evaluate [config|package|system] | evaluate --from <id> [target...]
 envmgr migrate [--no-history] <url> | migrate --follow <url>
 envmgr save [-m <message>] [--no-push]
 ```
@@ -116,8 +116,8 @@ envmgr save [-m <message>] [--no-push]
   found drift; `75` reboot or re-login required before continuing.
 - Envmgr commits only in `save`, and only the active machine's directory.
   It pushes only in `save` and `migrate`, and pulls only through the `git`
-  provider (fast-forward only, clean checkouts only) and the rebase in
-  `save`.
+  provider and `evaluate --from` (fast-forward only, clean checkouts only)
+  and the rebase in `save`.
 - Envmgr is written in Bash and must run under Bash 3.2, because
   `envmgr setup` runs from `/bin/bash` on a fresh Mac before Homebrew exists.
   No associative arrays, `mapfile`, `${var,,}`, or other Bash 4+ features.
@@ -417,6 +417,36 @@ with the agent's exit code. The prompt contains:
   documentation. It must not run `envmgr restore`, install packages, or
   commit.
 
+`evaluate --from <id> [target...] [--offline]` starts the agent to copy
+configuration from another machine to the selected one. Run it on the machine
+that receives the files, so the agent can look at the targets that already
+exist there and `envmgr save` commits the right directory afterward.
+
+1. Unless `--offline` is given, fetch the data checkout and fast-forward it
+   when it is clean, on the expected branch, and fully pushed (the same rule
+   as the `git` provider), so the comparison sees the latest files from the
+   other machine. Otherwise warn and compare the files already there.
+2. Compare the two machines' config sources by target, using `chezmoi
+   managed` and `chezmoi source-path` on each `config/` directory. Each
+   target is reported, with the source paths on each side, as **only there**
+   (a candidate to copy), **different** (sources differ in name or content; a
+   candidate to merge or replace), or **only here** (context only). Targets
+   with identical sources are omitted. Target arguments limit the comparison
+   to targets at or under them. Encrypted sources are compared as ciphertext.
+3. When nothing is only there or different, print so and exit `0` without
+   starting the agent.
+4. Otherwise start the agent as above. The prompt holds both machine IDs,
+   both `machine.conf` paths (so the agent can check an OS or distribution
+   difference), the comparison (paths only, never contents), and whether the
+   age key exists on this machine. The agent may read `machines/<from>/` but
+   edits only `machines/<id>/`; it keeps source names so attributes carry
+   over, copies `encrypted_` sources byte for byte without decrypting them,
+   may read existing targets under `~` to merge them (except files that look
+   like secrets), proposes deleting an only-here target only when asked, and
+   never restores or commits. It ends by pointing the user to
+   `envmgr restore config --dry-run`, `envmgr restore config`, and
+   `envmgr save`.
+
 ## Secrets
 
 - Files are unmanaged until adopted, including secret files.
@@ -474,3 +504,4 @@ with the agent's exit code. The prompt contains:
 | 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand; setup never generates one | 2026-11-14 |
 | 18 | `migrate --no-history` pushes one root commit; checkouts that cannot follow are renamed and re-cloned, never deleted | 2026-11-14 |
 | 19 | `save` commits only the active machine's directory and pushes it, rebasing onto `origin` when the local commits stay inside that directory; envmgr otherwise never commits | 2026-11-14 |
+| 20 | Copying configuration between machines goes through `evaluate --from`, run on the receiving machine, with a deterministic comparison in the prompt; there is no separate copy command | 2026-11-14 |

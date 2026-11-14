@@ -1097,6 +1097,89 @@ test_evaluate_starts_agent() {
   assert_eq "$rc" 7 "$out"
 }
 
+test_evaluate_from_compares_machines() {
+  data_checkout
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  make_agent
+  printf 'agent=%s\n' "$work/bin/agent" >>"$HOME/.config/envmgr/config"
+  local mac="$data/machines/mac/config"
+  printf 'same\n' >"$mac/dot_same"
+  printf 'mine\n' >"$mac/dot_diff"
+  git -C "$data" add -A
+  git -C "$data" commit -qm mac
+  git -C "$data" push -q origin main
+
+  # Another machine pushes its config; evaluate pulls it first.
+  git clone -q "$data_origin" "$work/second"
+  local other="$work/second/machines/other/config"
+  mkdir -p "$other/private_dot_config/example"
+  printf 'example-content\n' >"$other/private_dot_config/example/a.toml"
+  printf 'only\n' >"$other/dot_onlythere"
+  printf 'same\n' >"$other/dot_same"
+  printf 'theirs\n' >"$other/dot_diff"
+  printf 'x\n' >"$other/encrypted_dot_secret.age"
+  git -C "$work/second" add -A
+  git -C "$work/second" commit -qm other
+  git -C "$work/second" push -q origin main
+
+  run_envmgr evaluate --from other
+  assert_eq "$rc" 0 "$out"
+  [[ -f "$data/machines/other/config/dot_onlythere" ]] || fail "did not pull the data checkout"
+  assert_contains "$out" "only there  .config/example/a.toml"
+  assert_contains "$out" "there: machines/other/config/private_dot_config/example/a.toml"
+  assert_contains "$out" "only there  .onlythere"
+  assert_contains "$out" "different   .diff"
+  assert_contains "$out" "here:  machines/mac/config/dot_diff"
+  assert_contains "$out" "only here   .x"
+  assert_contains "$out" "encrypted_dot_secret.age"
+  [[ "$out" != *".same"* ]] || fail "listed an identical source"
+  assert_eq "$(cat "$work/agent.dir")" in-data
+  local args=""
+  args="$(cat "$work/agent.args")"
+  assert_contains "$args" 'from the envmgr machine "other"'
+  assert_contains "$args" 'machine "mac", which is this machine'
+  assert_contains "$args" "machines/other/machine.conf"
+  assert_contains "$args" "only there  .onlythere"
+  assert_contains "$args" "is missing on this machine"
+  assert_contains "$args" "edit only files under"
+  assert_contains "$args" "envmgr save."
+  [[ "$args" != *example-content* ]] || fail "prompt includes source contents"
+
+  # Targets narrow the comparison; with nothing to copy, no agent starts.
+  run_envmgr evaluate --from other "$HOME/.config/example"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" ".config/example/a.toml"
+  [[ "$out" != *onlythere* ]] || fail "did not narrow to the target"
+  rm -f "$work/agent.args"
+  run_envmgr evaluate --from other "$HOME/.same"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "nothing to copy from other"
+  [[ ! -f "$work/agent.args" ]] || fail "started the agent with nothing to copy"
+
+  # A checkout with local changes is compared as it is, and --offline
+  # skips the fetch.
+  printf 'later\n' >"$other/dot_later"
+  git -C "$work/second" add -A
+  git -C "$work/second" commit -qm later
+  git -C "$work/second" push -q origin main
+  run_envmgr evaluate --from other --offline
+  assert_eq "$rc" 0 "$out"
+  [[ "$out" != *.later* ]] || fail "--offline updated the checkout"
+  printf 'dirty\n' >>"$mac/dot_diff"
+  run_envmgr evaluate --from other
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "not updating the data checkout (uncommitted changes)"
+  [[ "$out" != *.later* ]] || fail "updated a dirty checkout"
+
+  run_envmgr evaluate --from mac
+  assert_eq "$rc" 2 "$out"
+  run_envmgr evaluate --from nowhere
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "machine does not exist: nowhere"
+  run_envmgr evaluate config system
+  assert_eq "$rc" 2 "$out"
+}
+
 # Clone a data origin into $data with one machine selected and a git
 # provider entry for the data repository itself.
 data_checkout() {
