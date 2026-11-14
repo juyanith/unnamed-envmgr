@@ -945,9 +945,14 @@ run_setup() {
 
 test_setup_clones_and_selects_machine() {
   make_data_origin
-  run_setup "$data_origin" "~/Work/data" 1 codex
+  run_setup "$data_origin" "~/Work/data" 1 codex y y
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "1) mac  Desk Mac"
+  [[ "$out" != *"== Save"* ]] || fail "offered to save an unchanged machine"
+  assert_contains "$out" "Restore mac now?"
+  assert_contains "$out" "config: restored 1 target(s)"
+  assert_eq "$(cat "$HOME/.x")" x
+  assert_contains "$out" "Setup is complete."
   [[ "$out" != *"other"* ]] || fail "offered a machine for another platform"
   assert_contains "$out" "Selected machine mac"
   assert_contains "$out" "does not use SSH"
@@ -970,10 +975,14 @@ test_setup_clones_and_selects_machine() {
 
 test_setup_new_machine_and_skip() {
   make_data_origin
-  run_setup "$data_origin" "" bogus n laptop mac ""
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  run_setup "$data_origin" "" bogus n laptop mac "" "" n
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "Enter a number, n, or s."
   assert_contains "$out" "Created machine laptop from mac."
+  assert_contains "$out" "save: pushed to origin/main"
+  git -C "$data_origin" cat-file -e main:machines/laptop/machine.conf || fail "laptop not pushed"
+  assert_contains "$out" "Skipped. Run envmgr restore"
   [[ -f "$HOME/Work/Git/envmgr-data/machines/laptop/config/dot_x" ]] || fail "machine not copied"
   assert_contains "$(cat "$HOME/.config/envmgr/config")" "machine=laptop"
   assert_contains "$(cat "$HOME/.config/envmgr/config")" "agent="
@@ -1063,6 +1072,21 @@ test_install_clones_and_starts_setup() {
   assert_contains "$out" "exists and is not a Git checkout"
 }
 
+test_setup_restore_stops_for_reboot() {
+  make_data_origin
+  git clone -q "$data_origin" "$work/seed2"
+  mkdir -p "$work/seed2/machines/mac/system/10-reboot"
+  printf '#!/bin/sh\n# Needs a reboot\nexit 75\n' >"$work/seed2/machines/mac/system/10-reboot/apply"
+  chmod +x "$work/seed2/machines/mac/system/10-reboot/apply"
+  git -C "$work/seed2" add -A
+  git -C "$work/seed2" -c user.name=t -c user.email=t@t commit -qm unit
+  git -C "$work/seed2" push -q origin main
+  run_setup "$data_origin" "" 1 "" "" y y
+  assert_eq "$rc" 75 "$out"
+  assert_contains "$out" "run envmgr setup again to continue"
+  [[ "$out" != *"Setup is complete."* ]] || fail "setup claimed to be complete"
+}
+
 test_setup_requires_terminal() {
   ENVMGR_TTY="$work/missing" run_envmgr setup
   assert_eq "$rc" 1 "$out"
@@ -1084,7 +1108,7 @@ test_setup_guards_existing_chezmoi_source() {
   assert_eq "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" "$(cat "$work/toml.before")"
   [[ "$(cat "$HOME/.config/envmgr/config")" != *"machine="* ]] || fail "selected a machine"
 
-  run_setup 1 y
+  run_setup 1 y n
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "Selected machine mac"
   assert_contains "$(cat "$HOME/.config/chezmoi/chezmoi.toml")" "machines/mac/config"
@@ -1451,7 +1475,7 @@ test_setup_reports_missing_age_key() {
   git -C "$work/seed2" add -A
   git -C "$work/seed2" -c user.name=t -c user.email=t@t commit -qm enc
   git -C "$work/seed2" push -q origin main
-  run_setup "$data_origin" "" 1 ""
+  run_setup "$data_origin" "" 1 "" n
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "has encrypted files"
   assert_contains "$out" "~/.config/envmgr/age.key"

@@ -13,6 +13,7 @@ envmgr_setup_open_tty() {
 
   { exec 3<"$tty"; } 2>/dev/null || \
     envmgr_die 1 "envmgr setup is interactive and needs a terminal"
+  ENVMGR_PROMPT_FD=3
 }
 
 # Ask a question with an optional default; prints the answer.
@@ -35,6 +36,14 @@ envmgr_ask_yes() {
 
   reply="$(envmgr_ask "$1 [y/N]")"
   [[ "$reply" == [Yy] || "$reply" == [Yy][Ee][Ss] ]]
+}
+
+# Like envmgr_ask_yes, but a blank answer means yes.
+envmgr_ask_no() {
+  local reply=""
+
+  reply="$(envmgr_ask "$1 [Y/n]")"
+  [[ "$reply" != [Nn] && "$reply" != [Nn][Oo] ]]
 }
 
 envmgr_setup_step() {
@@ -374,6 +383,59 @@ envmgr_setup_age_key() {
   printf 'readable only by you (chmod 600).\n'
 }
 
+# Commit and push a machine that setup created or changed, so it is on origin
+# even if restore later stops for a reboot.
+envmgr_setup_save() {
+  local machine=""
+  local data=""
+
+  machine="$(envmgr_kv_get "$(envmgr_local_config_file)" machine 2>/dev/null)" || return 0
+  data="$(envmgr_data_dir)"
+  [[ -e "$data/.git" ]] || return 0
+  [[ -n "$(git -C "$data" status --porcelain -- "machines/$machine")" ]] || return 0
+  envmgr_setup_step "Save"
+  printf 'Machine %s has changes that are not in the data repository yet.\n' "$machine"
+  if ! envmgr_ask_no "Commit and push them now?"; then
+    printf 'Not saved. Run envmgr save when you are ready.\n'
+    return 0
+  fi
+  # A failed save (for example, no push access yet) does not stop setup.
+  (envmgr_cmd_save --yes) || \
+    envmgr_warn "machine $machine was not saved; run envmgr save once the problem is fixed"
+}
+
+# Run envmgr restore. A reboot or a failure ends setup; running setup again
+# skips the finished steps and continues here.
+envmgr_setup_restore() {
+  local machine=""
+  local rc=0
+
+  machine="$(envmgr_kv_get "$(envmgr_local_config_file)" machine 2>/dev/null)" || return 0
+  envmgr_setup_step "Restore"
+  # After the git provider pulled new code, restore restarts setup; the
+  # user already chose to restore.
+  if [[ -z "${ENVMGR_REEXECUTED:-}" ]]; then
+    printf 'Restore installs packages, applies config, then runs system units,\n'
+    printf 'showing what will change before each.\n'
+    if ! envmgr_ask_no "Restore $machine now?"; then
+      printf 'Skipped. Run envmgr restore when you are ready.\n'
+      return 0
+    fi
+  fi
+  envmgr_cmd_restore || rc=$?
+  case "$rc" in
+    0) ;;
+    "$ENVMGR_EXIT_REBOOT")
+      printf '\nReboot or log out and back in, then run envmgr setup again to continue.\n'
+      exit "$ENVMGR_EXIT_REBOOT"
+      ;;
+    *)
+      printf '\nRestore stopped. Fix the problem above, then run envmgr setup again to continue.\n'
+      exit 1
+      ;;
+  esac
+}
+
 envmgr_cmd_setup() {
   [[ $# -eq 0 ]] || envmgr_usage_error "setup takes no arguments"
   envmgr_detect_platform
@@ -383,6 +445,8 @@ envmgr_cmd_setup() {
   envmgr_setup_machine
   envmgr_setup_age_key
   envmgr_setup_agent
+  envmgr_setup_save
+  envmgr_setup_restore
   exec 3<&-
-  printf '\nSetup is complete. Next: envmgr check, then envmgr restore.\n'
+  printf '\nSetup is complete.\n'
 }

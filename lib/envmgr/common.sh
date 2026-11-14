@@ -125,6 +125,13 @@ envmgr_confirm() {
   local reply=""
 
   [[ "$assume_yes" == true ]] && return 0
+  # Inside setup, answers come from its prompt input on descriptor 3.
+  if [[ "${ENVMGR_PROMPT_FD:-}" == 3 ]]; then
+    printf '%s [y/N] ' "$prompt" >&2
+    read -r reply <&3 || reply=""
+    [[ "$reply" == [Yy] || "$reply" == [Yy][Ee][Ss] ]]
+    return
+  fi
   if ! { : </dev/tty; } 2>/dev/null; then
     envmgr_die 1 "confirmation required but no terminal is available; rerun with --yes"
   fi

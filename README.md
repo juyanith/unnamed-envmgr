@@ -50,8 +50,13 @@ steps. It:
 5. If the machine has encrypted files and no age key, explains how to copy
    `~/.config/envmgr/age.key` from another machine.
 6. Optionally records an agent command for `envmgr evaluate`.
+7. Offers to commit and push a new or changed machine with `envmgr save`.
+8. Offers to run `envmgr restore`, which previews and confirms packages, then
+   config, then system units.
 
-Then review and apply:
+When restore needs a reboot or re-login (exit `75`), or stops on an error,
+setup says so; run `envmgr setup` again afterward and it continues where it
+stopped. Later, check and apply the machine with:
 
 ```sh
 envmgr check              # exit 0 in sync, 3 drift
