@@ -65,6 +65,11 @@ test_usage_errors() {
   assert_eq "$rc" 2 "unknown command"
   run_envmgr --help
   assert_eq "$rc" 0 "help"
+  assert_contains "$out" "Commit this machine's changes"
+  # Commands are listed alphabetically.
+  local commands=""
+  commands="$(printf '%s\n' "$out" | awk '/^  [a-z]/ { print $1 }' | uniq)"
+  assert_eq "$commands" "$(printf '%s\n' "$commands" | sort)" "commands sorted"
 }
 
 test_init_requires_data() {
