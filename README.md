@@ -21,6 +21,14 @@ it. See [DESIGN.md](DESIGN.md) for the full specification.
 ## First run
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/juyanith/unnamed-envmgr/main/install.sh | bash
+```
+
+`install.sh` makes Git usable (on macOS it installs the Command Line Tools
+and waits for them), clones envmgr into `~/.local/share/unnamed-envmgr`, and
+starts `envmgr setup`. To do the same by hand:
+
+```sh
 git clone https://github.com/juyanith/unnamed-envmgr ~/.local/share/unnamed-envmgr
 ~/.local/share/unnamed-envmgr/bin/envmgr setup
 ```
@@ -30,19 +38,31 @@ steps. It:
 
 1. Installs Git and Chezmoi if they are missing (Command Line Tools and
    Homebrew on macOS, `omarchy pkg add` on Omarchy, Homebrew on Fedora
-   Atomic) and links `~/.local/bin/envmgr`.
+   Atomic), asking once for the administrator password that Homebrew's
+   installer needs, and links `~/.local/bin/envmgr`.
 2. For an SSH data URL on GitHub, creates `~/.ssh/id_ed25519` if needed,
    shows the public key, opens https://github.com/settings/ssh/new, and waits
    until GitHub accepts the key. `gh` is not needed.
 3. Clones the data repository (default
    `git@github.com:juyanith/envmgr-data.git` into `~/Work/Git/envmgr-data`).
-4. Selects this machine from the data repository, creates a new one
-   (optionally copied from an existing machine), or skips.
-5. If the machine has encrypted files and no age key, explains how to copy
-   `~/.config/envmgr/age.key` from another machine.
+4. Selects this machine from the data repository, creates a new one, or
+   skips. A new machine's ID defaults to the host name, and it is copied
+   from the matching machine changed most recently unless you choose another
+   one or `none`.
+5. If the machine has encrypted files and no age key, lets you paste the key
+   (for example, from a password manager), checks that it decrypts the
+   machine's files, and saves it as `~/.config/envmgr/age.key`. Or press
+   Enter and copy the file over from another machine before restoring.
 6. Optionally records an agent command for `envmgr evaluate`.
+7. Offers to commit and push a new or changed machine with `envmgr save`.
+8. Offers to run `envmgr restore`, which previews and confirms packages, then
+   config, then system units.
+9. Prints the machine's `POSTINSTALL.md`, if it has one: manual steps such as
+   signing in to the App Store or granting privacy permissions.
 
-Then review and apply:
+When restore needs a reboot or re-login (exit `75`), or stops on an error,
+setup says so; run `envmgr setup` again afterward and it continues where it
+stopped. Later, check and apply the machine with:
 
 ```sh
 envmgr check              # exit 0 in sync, 3 drift
@@ -76,7 +96,8 @@ envmgr migrate --follow <url>          # then, on every other machine
 envmgr save                            # commit this machine's changes, push
 ```
 
-The first `--encrypt` creates `~/.config/envmgr/age.key`. Back it up and copy
+The first `--encrypt` creates `~/.config/envmgr/age.key`. Back it up (a
+password manager works well, because setup accepts the pasted key) and copy
 it to each machine that restores encrypted files; it is never committed.
 
 ## Development

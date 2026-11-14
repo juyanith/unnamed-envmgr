@@ -96,7 +96,7 @@ envmgr_create_machine() {
   } >"$machine_dir/machine.conf"
 
   if [[ -n "$from" ]]; then
-    for item in config packages system SPEC.md; do
+    for item in config packages system SPEC.md POSTINSTALL.md; do
       [[ -e "$from_dir/$item" ]] && cp -pR -- "$from_dir/$item" "$machine_dir/"
     done
     printf 'Created machine %s from %s.\n' "$machine" "$from"

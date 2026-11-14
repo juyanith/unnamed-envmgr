@@ -32,7 +32,7 @@ inheritance between machines.
 
 | Repository | Visibility | Contents |
 |---|---|---|
-| `unnamed-envmgr` | Public | The tool only: `bin/envmgr`, `lib/envmgr/`, tests, `README.md` (first-run walkthrough), `DESIGN.md`, `AGENTS.md`. Cloned over HTTPS; no `gh` or credentials needed. |
+| `unnamed-envmgr` | Public | The tool only: `install.sh`, `bin/envmgr`, `lib/envmgr/`, tests, `README.md` (first-run walkthrough), `DESIGN.md`, `AGENTS.md`. Cloned over HTTPS; no `gh` or credentials needed. |
 | `envmgr-data` | Private | `machines/`, plus an `AGENTS.md` with configuration rules (for example, Omarchy's `/usr/share/omarchy/` is read-only upstream state). Cloned over SSH. |
 | `envmgr` | Private | Legacy layered implementation and `legacy-export.sh`. Deleted by the user once the machines they care about are migrated. |
 
@@ -45,6 +45,7 @@ machines/
   <machine-id>/
     machine.conf           # metadata
     SPEC.md                # human/agent specification for this machine
+    POSTINSTALL.md         # optional: manual steps envmgr cannot automate
     config/                # complete Chezmoi source for this machine
     packages/<provider>/   # provider manifests (see Packages)
     system/<NN-name>/      # system units (see System units)
@@ -142,20 +143,37 @@ envmgr save [-m <message>] [--no-push]
 
 #### `envmgr setup`
 
-The `unnamed-envmgr` README directs a new user to:
+The `unnamed-envmgr` README directs a new user to one command:
 
 ```sh
-git clone https://github.com/juyanith/unnamed-envmgr ~/.local/share/unnamed-envmgr
-~/.local/share/unnamed-envmgr/bin/envmgr setup
+curl -fsSL https://raw.githubusercontent.com/juyanith/unnamed-envmgr/main/install.sh | bash
 ```
+
+`install.sh` does only what `setup` cannot do for itself, and knows nothing
+about machines or packages:
+
+- Make Git usable: on macOS, start the Command Line Tools installer and wait
+  until `xcode-select -p` succeeds; elsewhere, use `git` when present, run
+  `omarchy pkg add git` on Omarchy, and otherwise stop and ask the user to
+  install Git.
+- Clone the tool into `~/.local/share/unnamed-envmgr` over HTTPS, or
+  fast-forward an existing checkout (warning when it cannot).
+- Replace itself with `envmgr setup`, reading from the terminal rather than
+  from the download. All of the script runs from a function called on its
+  last line, so a partial download does nothing.
+
+Cloning by hand and running `bin/envmgr setup` is equivalent.
 
 `setup` is interactive and idempotent. It skips steps that are already
 complete:
 
 1. **Prerequisites.** Install Git and Chezmoi with the platform's native
    method (Xcode Command Line Tools and Homebrew on macOS, `omarchy pkg add`
-   on Omarchy, a Homebrew bootstrap on Fedora Atomic, which may return `75`).
-   Link `~/.local/bin/envmgr`.
+   on Omarchy, a Homebrew bootstrap on Fedora Atomic). Setup waits for the
+   Command Line Tools installer to finish rather than exiting. Before
+   installing Homebrew, it runs `sudo -v` once and keeps the timestamp fresh
+   until it exits, because Homebrew's non-interactive installer fails when
+   `sudo` would prompt. Link `~/.local/bin/envmgr`.
 2. **SSH.** If no key exists, create `~/.ssh/id_ed25519` (with a passphrase
    prompt). Print the public key, open
    `https://github.com/settings/ssh/new`, and wait for confirmation. Verify
@@ -166,14 +184,40 @@ complete:
 4. **Machine.** Offer the existing machines whose `os`/`distribution` match
    the running system, a new machine (optionally copied from one of them), or
    skip (used during legacy migration). Selecting a machine runs
-   `envmgr init`. When Chezmoi currently uses a source outside the data
+   `envmgr init`. For a new machine, setup suggests an ID made from the host
+   name (lowercased, other characters replaced by `-`) when it is free,
+   suggests copying the matching machine whose directory has the latest
+   commit (`none` starts empty), and asks for the `description`.
+   Machines on another OS are never offered; a first machine on a new OS
+   starts empty and is built up carefully with `adopt` and
+   `evaluate --from`. When Chezmoi currently uses a source outside the data
    repository (for example, the legacy checkout), setup says so, recommends
    skip, and asks before switching.
 5. **Age key.** When the selected machine has `encrypted_` files and
-   `~/.config/envmgr/age.key` is missing, explain how to copy the key from
-   another machine. Setup never generates a key, because a new key cannot
-   decrypt existing files.
+   `~/.config/envmgr/age.key` is missing, ask for the key to be pasted,
+   without echoing it. Comment lines are skipped, so the `AGE-SECRET-KEY-`
+   line or the whole key file can be pasted. Setup writes it with mode `600`
+   only after it decrypts one of the machine's `encrypted_` files (`chezmoi
+   decrypt` with a temporary config), and asks again otherwise. A blank
+   answer explains how to copy the file instead. Setup never generates a
+   key, because a new key cannot decrypt existing files.
 6. **Agent.** Optionally record the agent command for `evaluate`.
+7. **Save.** When the selected machine's directory has uncommitted changes
+   (for example, a machine created in step 4), offer to run `envmgr save`,
+   so the machine is on `origin` before anything long-running. A failed
+   save warns and setup continues.
+8. **Restore.** Offer to run `envmgr restore`, which previews and confirms
+   each phase as usual; inside setup, its confirmations read the same input
+   as setup's questions. When restore exits `75`, setup asks for a reboot or
+   re-login and exits `75`; on any other failure it exits `1`. Either way,
+   running `envmgr setup` again skips the finished steps and reaches restore
+   again. When the `git` provider pulls new code, restore re-executes
+   `envmgr setup`, which continues to restore without asking again.
+
+9. **Manual steps.** Print the machine's `POSTINSTALL.md`, if present: the
+   steps envmgr cannot automate, such as App Store sign-in or privacy grants.
+
+Yes/no questions whose usual answer is yes (save, restore) default to yes.
 
 #### `envmgr init`
 
@@ -185,8 +229,9 @@ complete:
   did not clone.
 - `init --new <id> [--from <id>]` creates `machines/<id>/` with detected
   metadata and an empty `config/`, `packages/`, `system/`, and `SPEC.md`.
-  With `--from`, it copies those directories from another machine with the
-  same `os` and `distribution`. Copies are owned independently from then on.
+  With `--from`, it copies those, and `POSTINSTALL.md`, from another
+  machine with the same `os` and `distribution`. Copies are owned
+  independently from then on.
   The new machine is then selected as with `init <id>`.
 
 #### `envmgr migrate`
@@ -450,8 +495,8 @@ repository root, with one appended argument: the initial prompt. The command
 is split on whitespace (quotes are not interpreted), and `evaluate` exits
 with the agent's exit code. The prompt contains:
 
-- the machine ID and the paths to `machine.conf`, `SPEC.md`, the data
-  repository's `AGENTS.md`, and this `DESIGN.md`;
+- the machine ID and the paths to `machine.conf`, `SPEC.md`,
+  `POSTINSTALL.md`, the data repository's `AGENTS.md`, and this `DESIGN.md`;
 - current `check` output for the selected categories, as paths and statuses,
   never file contents;
 - the approval boundary: the agent may edit `machines/<id>/` and repository
@@ -547,8 +592,10 @@ the right directory afterward.
 | 14 | Secrets only through Chezmoi age encryption | 2026-11-14 |
 | 15 | Agent invoked as a command with the prompt appended as the last argument | 2026-11-14 |
 | 16 | `migrate` pushes `origin`'s branches and tags instead of `--mirror` | 2026-11-14 |
-| 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand; setup never generates one | 2026-11-14 |
+| 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand or pasted into setup, which checks it decrypts the machine's files; setup never generates one | 2026-11-14 |
 | 18 | `migrate --no-history` pushes one root commit; checkouts that cannot follow are renamed and re-cloned, never deleted | 2026-11-14 |
 | 19 | `save` commits only the active machine's directory and pushes it, rebasing onto `origin` when the local commits stay inside that directory; envmgr otherwise never commits | 2026-11-14 |
 | 20 | Copying configuration between machines that needs judgement (existing targets, merges) goes through `evaluate --from`, run on the receiving machine, with a deterministic comparison in the prompt | 2026-11-14 |
 | 21 | `adopt config --from` copies sources only for targets that do not exist on this machine; anything else is sent to `evaluate --from` | 2026-11-14 |
+| 22 | A new machine starts from one OS-neutral command, `install.sh` piped from GitHub, which only makes Git usable, clones the tool, and starts `setup`; a machine is based on an existing machine with the same `os` and `distribution`, or starts empty | 2026-11-14 |
+| 23 | `setup` carries on through `save` and `restore`, so the one command leaves the machine configured; after a reboot or error, rerunning `setup` resumes | 2026-11-14 |

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fake hostname for setup tests.
+echo "Test-Mac"
