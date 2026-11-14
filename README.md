@@ -47,8 +47,10 @@ steps. It:
    `git@github.com:juyanith/envmgr-data.git` into `~/Work/Git/envmgr-data`).
 4. Selects this machine from the data repository, creates a new one
    (optionally copied from an existing machine), or skips.
-5. If the machine has encrypted files and no age key, explains how to copy
-   `~/.config/envmgr/age.key` from another machine.
+5. If the machine has encrypted files and no age key, lets you paste the key
+   (for example, from a password manager), checks that it decrypts the
+   machine's files, and saves it as `~/.config/envmgr/age.key`. Or press
+   Enter and copy the file over from another machine before restoring.
 6. Optionally records an agent command for `envmgr evaluate`.
 7. Offers to commit and push a new or changed machine with `envmgr save`.
 8. Offers to run `envmgr restore`, which previews and confirms packages, then
@@ -90,7 +92,8 @@ envmgr migrate --follow <url>          # then, on every other machine
 envmgr save                            # commit this machine's changes, push
 ```
 
-The first `--encrypt` creates `~/.config/envmgr/age.key`. Back it up and copy
+The first `--encrypt` creates `~/.config/envmgr/age.key`. Back it up (a
+password manager works well, because setup accepts the pasted key) and copy
 it to each machine that restores encrypted files; it is never committed.
 
 ## Development

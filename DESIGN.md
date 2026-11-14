@@ -187,9 +187,13 @@ complete:
    repository (for example, the legacy checkout), setup says so, recommends
    skip, and asks before switching.
 5. **Age key.** When the selected machine has `encrypted_` files and
-   `~/.config/envmgr/age.key` is missing, explain how to copy the key from
-   another machine. Setup never generates a key, because a new key cannot
-   decrypt existing files.
+   `~/.config/envmgr/age.key` is missing, ask for the key to be pasted,
+   without echoing it. Comment lines are skipped, so the `AGE-SECRET-KEY-`
+   line or the whole key file can be pasted. Setup writes it with mode `600`
+   only after it decrypts one of the machine's `encrypted_` files (`chezmoi
+   decrypt` with a temporary config), and asks again otherwise. A blank
+   answer explains how to copy the file instead. Setup never generates a
+   key, because a new key cannot decrypt existing files.
 6. **Agent.** Optionally record the agent command for `evaluate`.
 7. **Save.** When the selected machine's directory has uncommitted changes
    (for example, a machine created in step 4), offer to run `envmgr save`,
@@ -577,7 +581,7 @@ the right directory afterward.
 | 14 | Secrets only through Chezmoi age encryption | 2026-11-14 |
 | 15 | Agent invoked as a command with the prompt appended as the last argument | 2026-11-14 |
 | 16 | `migrate` pushes `origin`'s branches and tags instead of `--mirror` | 2026-11-14 |
-| 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand; setup never generates one | 2026-11-14 |
+| 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand or pasted into setup, which checks it decrypts the machine's files; setup never generates one | 2026-11-14 |
 | 18 | `migrate --no-history` pushes one root commit; checkouts that cannot follow are renamed and re-cloned, never deleted | 2026-11-14 |
 | 19 | `save` commits only the active machine's directory and pushes it, rebasing onto `origin` when the local commits stay inside that directory; envmgr otherwise never commits | 2026-11-14 |
 | 20 | Copying configuration between machines that needs judgement (existing targets, merges) goes through `evaluate --from`, run on the receiving machine, with a deterministic comparison in the prompt | 2026-11-14 |

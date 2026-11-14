@@ -1475,10 +1475,41 @@ test_setup_reports_missing_age_key() {
   git -C "$work/seed2" add -A
   git -C "$work/seed2" -c user.name=t -c user.email=t@t commit -qm enc
   git -C "$work/seed2" push -q origin main
-  run_setup "$data_origin" "" 1 "" n
+  run_setup "$data_origin" "" 1 "" "" n
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "has encrypted files"
-  assert_contains "$out" "~/.config/envmgr/age.key"
+  assert_contains "$out" "copy the key to ~/.config/envmgr/age.key"
+  [[ ! -e "$HOME/.config/envmgr/age.key" ]] || fail "created a key"
+}
+
+test_setup_accepts_pasted_age_key() {
+  make_data_origin
+  local key="$work/key" other="$work/other-key" recipient=""
+  chezmoi age-keygen --output "$key" >/dev/null 2>&1
+  chezmoi age-keygen --output "$other" >/dev/null 2>&1
+  chmod 600 "$key" "$other"
+  recipient="$(chezmoi age-keygen --convert "$key")"
+  printf 'encryption = "age"\n[age]\n  recipient = "%s"\n' "$recipient" >"$work/enc.toml"
+  git clone -q "$data_origin" "$work/seed2"
+  printf 'secret\n' | chezmoi --config "$work/enc.toml" --config-format toml encrypt \
+    >"$work/seed2/machines/mac/config/encrypted_dot_secret.age"
+  git -C "$work/seed2" add -A
+  git -C "$work/seed2" -c user.name=t -c user.email=t@t commit -qm enc
+  git -C "$work/seed2" push -q origin main
+
+  # A non-key, a key that does not fit, then the whole key file pasted.
+  printf '%s\n' "$data_origin" "" 1 bogus "$(tail -n 1 "$other")" >"$work/answers"
+  cat "$key" >>"$work/answers"
+  printf '%s\n' "" n >>"$work/answers"
+  ENVMGR_TTY="$work/answers" run_envmgr setup
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "That is not an age secret key"
+  assert_contains "$out" "That key does not decrypt"
+  assert_contains "$out" "Saved the age key to ~/.config/envmgr/age.key"
+  [[ "$out" != *"AGE-SECRET-KEY-1"* ]] || fail "echoed the key"
+  assert_eq "$(cat "$HOME/.config/envmgr/age.key")" "$(tail -n 1 "$key")"
+  assert_eq "$(ls -l "$HOME/.config/envmgr/age.key" | cut -c1-10)" "-rw-------"
+  [[ ! -e "$HOME/.config/envmgr/age.key.new" ]] || fail "left the temporary key"
 }
 
 test_save_commits_and_pushes() {

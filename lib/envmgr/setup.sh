@@ -361,26 +361,84 @@ envmgr_setup_agent() {
   envmgr_kv_set "$config" agent "$agent"
 }
 
-# The age key is copied by hand, never generated here: a new key could not
+# Read one line from setup's input without echoing it. Comment lines are
+# skipped, so pasting a whole age key file works as well as pasting its key.
+envmgr_setup_read_secret() {
+  local line=""
+
+  printf '%s: ' "$1" >&2
+  while read -r -s line <&3; do
+    [[ "$line" == \#* ]] || break
+  done
+  printf '\n' >&2
+  printf '%s\n' "$line"
+}
+
+# Check that an age identity file decrypts an encrypted source.
+envmgr_setup_key_decrypts() {
+  local key="$1"
+  local file="$2"
+  local config=""
+  local rc=0
+
+  config="$(mktemp "${TMPDIR:-/tmp}/envmgr-age.XXXXXX")"
+  printf 'encryption = "age"\n[age]\n  identity = "%s"\n' "$key" >"$config"
+  chezmoi --config "$config" --config-format toml decrypt "$file" >/dev/null 2>&1 || rc=1
+  rm -f -- "$config"
+  return "$rc"
+}
+
+# The age key is copied or pasted, never generated here: a new key could not
 # decrypt files that another machine encrypted.
 envmgr_setup_age_key() {
   local data=""
   local machine=""
   local config=""
+  local encrypted=""
+  local key=""
+  local file=""
+  local tmp=""
 
   machine="$(envmgr_kv_get "$(envmgr_local_config_file)" machine 2>/dev/null)" || return 0
   data="$(envmgr_data_dir)"
   config="$data/machines/$machine/config"
-  [[ -d "$config" && -n "$(find "$config" -name 'encrypted_*' -print | head -n 1)" ]] || return 0
+  [[ -d "$config" ]] || return 0
+  encrypted="$(find "$config" -name 'encrypted_*' -type f -print | head -n 1)"
+  [[ -n "$encrypted" ]] || return 0
   envmgr_setup_step "Age key"
-  if [[ -r "$(envmgr_age_key_file)" ]]; then
+  file="$(envmgr_age_key_file)"
+  if [[ -r "$file" ]]; then
     printf 'The age key for encrypted files is present.\n'
     return 0
   fi
-  printf 'Machine %s has encrypted files. Before envmgr restore, copy the age key\n' "$machine"
-  printf 'from a machine that has it (or from your backup) to %s,\n' \
-    "$(envmgr_display_path "$(envmgr_age_key_file)")"
-  printf 'readable only by you (chmod 600).\n'
+  printf 'Machine %s has encrypted files, which need the age key from another\n' "$machine"
+  printf 'machine or your backup. Paste it here (the AGE-SECRET-KEY- line, or the\n'
+  printf 'whole file), or press Enter to copy it to %s later.\n' "$(envmgr_display_path "$file")"
+  mkdir -p -- "$(dirname -- "$file")"
+  tmp="$file.new"
+  while true; do
+    key="$(envmgr_setup_read_secret "Age key")"
+    if [[ -z "$key" ]]; then
+      printf 'Before envmgr restore, copy the key to %s, readable only by you (chmod 600).\n' \
+        "$(envmgr_display_path "$file")"
+      return 0
+    fi
+    if [[ "$key" =~ ^AGE-SECRET-KEY-[0-9A-Z-]+$ ]]; then
+      (umask 077 && printf '%s\n' "$key" >"$tmp")
+      if envmgr_setup_key_decrypts "$tmp" "$encrypted"; then
+        mv -f -- "$tmp" "$file"
+        chmod 600 "$file"
+        printf 'Saved the age key to %s. Back it up if you have not already.\n' \
+          "$(envmgr_display_path "$file")"
+        return 0
+      fi
+      rm -f -- "$tmp"
+      printf 'That key does not decrypt %s; paste the key this machine'\''s files use.\n' \
+        "$(envmgr_display_path "$encrypted")"
+    else
+      printf 'That is not an age secret key; it starts with AGE-SECRET-KEY-.\n'
+    fi
+  done
 }
 
 # Commit and push a machine that setup created or changed, so it is on origin
