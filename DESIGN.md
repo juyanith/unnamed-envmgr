@@ -32,7 +32,7 @@ inheritance between machines.
 
 | Repository | Visibility | Contents |
 |---|---|---|
-| `unnamed-envmgr` | Public | The tool only: `bin/envmgr`, `lib/envmgr/`, tests, `README.md` (first-run walkthrough), `DESIGN.md`, `AGENTS.md`. Cloned over HTTPS; no `gh` or credentials needed. |
+| `unnamed-envmgr` | Public | The tool only: `install.sh`, `bin/envmgr`, `lib/envmgr/`, tests, `README.md` (first-run walkthrough), `DESIGN.md`, `AGENTS.md`. Cloned over HTTPS; no `gh` or credentials needed. |
 | `envmgr-data` | Private | `machines/`, plus an `AGENTS.md` with configuration rules (for example, Omarchy's `/usr/share/omarchy/` is read-only upstream state). Cloned over SSH. |
 | `envmgr` | Private | Legacy layered implementation and `legacy-export.sh`. Deleted by the user once the machines they care about are migrated. |
 
@@ -142,20 +142,37 @@ envmgr save [-m <message>] [--no-push]
 
 #### `envmgr setup`
 
-The `unnamed-envmgr` README directs a new user to:
+The `unnamed-envmgr` README directs a new user to one command:
 
 ```sh
-git clone https://github.com/juyanith/unnamed-envmgr ~/.local/share/unnamed-envmgr
-~/.local/share/unnamed-envmgr/bin/envmgr setup
+curl -fsSL https://raw.githubusercontent.com/juyanith/unnamed-envmgr/main/install.sh | bash
 ```
+
+`install.sh` does only what `setup` cannot do for itself, and knows nothing
+about machines or packages:
+
+- Make Git usable: on macOS, start the Command Line Tools installer and wait
+  until `xcode-select -p` succeeds; elsewhere, use `git` when present, run
+  `omarchy pkg add git` on Omarchy, and otherwise stop and ask the user to
+  install Git.
+- Clone the tool into `~/.local/share/unnamed-envmgr` over HTTPS, or
+  fast-forward an existing checkout (warning when it cannot).
+- Replace itself with `envmgr setup`, reading from the terminal rather than
+  from the download. All of the script runs from a function called on its
+  last line, so a partial download does nothing.
+
+Cloning by hand and running `bin/envmgr setup` is equivalent.
 
 `setup` is interactive and idempotent. It skips steps that are already
 complete:
 
 1. **Prerequisites.** Install Git and Chezmoi with the platform's native
    method (Xcode Command Line Tools and Homebrew on macOS, `omarchy pkg add`
-   on Omarchy, a Homebrew bootstrap on Fedora Atomic, which may return `75`).
-   Link `~/.local/bin/envmgr`.
+   on Omarchy, a Homebrew bootstrap on Fedora Atomic). Setup waits for the
+   Command Line Tools installer to finish rather than exiting. Before
+   installing Homebrew, it runs `sudo -v` once and keeps the timestamp fresh
+   until it exits, because Homebrew's non-interactive installer fails when
+   `sudo` would prompt. Link `~/.local/bin/envmgr`.
 2. **SSH.** If no key exists, create `~/.ssh/id_ed25519` (with a passphrase
    prompt). Print the public key, open
    `https://github.com/settings/ssh/new`, and wait for confirmation. Verify
@@ -552,3 +569,4 @@ the right directory afterward.
 | 19 | `save` commits only the active machine's directory and pushes it, rebasing onto `origin` when the local commits stay inside that directory; envmgr otherwise never commits | 2026-11-14 |
 | 20 | Copying configuration between machines that needs judgement (existing targets, merges) goes through `evaluate --from`, run on the receiving machine, with a deterministic comparison in the prompt | 2026-11-14 |
 | 21 | `adopt config --from` copies sources only for targets that do not exist on this machine; anything else is sent to `evaluate --from` | 2026-11-14 |
+| 22 | A new machine starts from one OS-neutral command, `install.sh` piped from GitHub, which only makes Git usable, clones the tool, and starts `setup`; a machine is based on an existing machine with the same `os` and `distribution`, or starts empty | 2026-11-14 |

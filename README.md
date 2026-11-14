@@ -21,6 +21,14 @@ it. See [DESIGN.md](DESIGN.md) for the full specification.
 ## First run
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/juyanith/unnamed-envmgr/main/install.sh | bash
+```
+
+`install.sh` makes Git usable (on macOS it installs the Command Line Tools
+and waits for them), clones envmgr into `~/.local/share/unnamed-envmgr`, and
+starts `envmgr setup`. To do the same by hand:
+
+```sh
 git clone https://github.com/juyanith/unnamed-envmgr ~/.local/share/unnamed-envmgr
 ~/.local/share/unnamed-envmgr/bin/envmgr setup
 ```
@@ -30,7 +38,8 @@ steps. It:
 
 1. Installs Git and Chezmoi if they are missing (Command Line Tools and
    Homebrew on macOS, `omarchy pkg add` on Omarchy, Homebrew on Fedora
-   Atomic) and links `~/.local/bin/envmgr`.
+   Atomic), asking once for the administrator password that Homebrew's
+   installer needs, and links `~/.local/bin/envmgr`.
 2. For an SSH data URL on GitHub, creates `~/.ssh/id_ed25519` if needed,
    shows the public key, opens https://github.com/settings/ssh/new, and waits
    until GitHub accepts the key. `gh` is not needed.

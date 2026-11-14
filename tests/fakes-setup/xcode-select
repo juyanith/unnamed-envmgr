@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Fake xcode-select for setup tests: -p succeeds once it has been called
+# $FAKE_CLT_AFTER times (default 0); --install is logged.
+state="${FAKE_STATE:?}"
+printf 'xcode-select %s\n' "$*" >>"$state/log"
+case "$1" in
+  --install) exit 0 ;;
+  -p)
+    count=$(( $(cat "$state/clt-count" 2>/dev/null || echo 0) + 1 ))
+    printf '%s\n' "$count" >"$state/clt-count"
+    [[ "$count" -gt "${FAKE_CLT_AFTER:-0}" ]] || exit 2
+    echo /Library/Developer/CommandLineTools
+    ;;
+esac

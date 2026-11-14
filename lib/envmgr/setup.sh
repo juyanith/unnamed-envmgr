@@ -59,10 +59,27 @@ envmgr_setup_brew_path() {
   export PATH
 }
 
+# Ask for the administrator password once, and keep sudo's timestamp fresh
+# until setup exits, so long installs never stop at a hidden prompt. The
+# Homebrew installer runs non-interactively and fails when sudo would ask.
+envmgr_setup_sudo() {
+  [[ -z "${ENVMGR_SUDO_KEEPALIVE:-}" ]] || return 0
+  printf 'Installing Homebrew needs administrator access; enter your password if asked.\n'
+  sudo -v || envmgr_die 1 "administrator access is required to install Homebrew"
+  (
+    while kill -0 "$$" 2>/dev/null; do
+      sudo -n true 2>/dev/null || true
+      sleep 50
+    done
+  ) >/dev/null 2>&1 &
+  ENVMGR_SUDO_KEEPALIVE=$!
+}
+
 envmgr_setup_brew_install() {
   local rc=0
 
   if ! envmgr_setup_brew_path; then
+    envmgr_setup_sudo
     printf 'Installing Homebrew.\n'
     envmgr_pkg_homebrew_bootstrap || rc=$?
     case "$rc" in
@@ -83,8 +100,12 @@ envmgr_setup_prerequisites() {
   envmgr_setup_step "Prerequisites"
   if [[ "$ENVMGR_OS" == darwin ]] && ! xcode-select -p >/dev/null 2>&1; then
     xcode-select --install >/dev/null 2>&1 || true
-    printf 'Finish installing the Command Line Tools, then rerun envmgr setup.\n'
-    exit "$ENVMGR_EXIT_REBOOT"
+    printf 'Installing the Command Line Tools. Finish the dialog that macOS opened;\n'
+    printf 'setup continues by itself once they are installed (Ctrl-C stops).\n'
+    until xcode-select -p >/dev/null 2>&1; do
+      sleep "${ENVMGR_POLL_SECONDS:-5}"
+    done
+    printf 'The Command Line Tools are installed.\n'
   fi
   for tool in git chezmoi; do
     command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")

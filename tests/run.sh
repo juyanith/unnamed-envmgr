@@ -1017,6 +1017,52 @@ test_setup_guides_github_ssh() {
   assert_contains "$(cat "$HOME/.config/envmgr/config")" "data_url=git@github.com:someone/data.git"
 }
 
+test_setup_waits_for_command_line_tools() {
+  make_data_origin
+  export FAKE_STATE="$work/fake" FAKE_CLT_AFTER=3 ENVMGR_POLL_SECONDS=0
+  mkdir -p "$FAKE_STATE"
+  export PATH="$root/tests/fakes-setup:$PATH"
+  run_setup "$data_origin" "" s ""
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "continues by itself"
+  assert_contains "$out" "The Command Line Tools are installed."
+  assert_contains "$(cat "$FAKE_STATE/log")" "xcode-select --install"
+  assert_contains "$out" "Skipped."
+}
+
+# Run install.sh against a clone of this repository; setup then stops for
+# want of a terminal, which shows that it was started.
+run_install() {
+  set +e
+  out="$(ENVMGR_REPO_URL="$root" ENVMGR_INSTALL_DIR="$work/tool" \
+    ENVMGR_TTY="$work/missing" "$test_bash" "$root/install.sh" 2>&1)"
+  rc=$?
+  set -e
+}
+
+test_install_clones_and_starts_setup() {
+  export FAKE_STATE="$work/fake" FAKE_CLT_AFTER=1 ENVMGR_POLL_SECONDS=0
+  mkdir -p "$FAKE_STATE"
+  export PATH="$root/tests/fakes-setup:$PATH"
+  run_install
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "The Command Line Tools are installed."
+  assert_contains "$out" "Cloned envmgr into $work/tool."
+  assert_contains "$out" "needs a terminal"
+  [[ -x "$work/tool/bin/envmgr" ]] || fail "tool not cloned"
+
+  run_install
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "Using the envmgr checkout in $work/tool."
+  assert_contains "$out" "needs a terminal"
+
+  rm -rf "$work/tool"
+  mkdir -p "$work/tool"
+  run_install
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "exists and is not a Git checkout"
+}
+
 test_setup_requires_terminal() {
   ENVMGR_TTY="$work/missing" run_envmgr setup
   assert_eq "$rc" 1 "$out"
