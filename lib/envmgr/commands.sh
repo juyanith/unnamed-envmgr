@@ -108,6 +108,7 @@ envmgr_cmd_check() {
   local offline=false
   local machine_dir=""
   local machine=""
+  local each=""
   local result=0
   local rc=0
 
@@ -128,24 +129,24 @@ envmgr_cmd_check() {
   machine_dir="$(envmgr_active_machine_dir warn)"
   machine="$(basename -- "$machine_dir")"
 
-  # Every check refreshes config, the only implemented category. Package and
-  # system checks will share this path once implemented.
-  rc=0
-  if [[ -z "$category" || "$category" == config ]]; then
-    envmgr_check_config "$machine_dir" || rc=$?
-  else
-    envmgr_check_config "$machine_dir" >/dev/null || rc=$?
-  fi
-  case "$rc" in
-    0) ;;
-    "$ENVMGR_EXIT_DRIFT") result="$ENVMGR_EXIT_DRIFT" ;;
-    *) exit "$rc" ;;
-  esac
-  if [[ -n "$category" && "$category" != config ]]; then
-    envmgr_warn "$category checks are not implemented yet"
-    result=0
-  elif [[ -z "$category" ]]; then
-    envmgr_warn "package and system checks are not implemented yet"
+  # Every check refreshes every implemented category, so the marker reflects
+  # the whole machine; only the requested category is printed.
+  for each in config system; do
+    rc=0
+    if [[ -z "$category" || "$category" == "$each" ]]; then
+      "envmgr_check_$each" "$machine_dir" || rc=$?
+    else
+      "envmgr_check_$each" "$machine_dir" >/dev/null 2>&1 || rc=$?
+      continue
+    fi
+    case "$rc" in
+      0) ;;
+      "$ENVMGR_EXIT_DRIFT") [[ "$result" -ne 0 ]] || result="$ENVMGR_EXIT_DRIFT" ;;
+      *) result=1 ;;
+    esac
+  done
+  if [[ -z "$category" || "$category" == package ]]; then
+    envmgr_warn "package checks are not implemented yet"
   fi
 
   envmgr_refresh_summary "$machine"
@@ -167,16 +168,21 @@ envmgr_cmd_list() {
     [[ -z "$category" ]] && printf '# config\n'
     envmgr_list_config "$machine_dir"
   fi
-  if [[ -n "$category" && "$category" != config ]]; then
-    envmgr_warn "listing $category is not implemented yet"
+  if [[ -z "$category" || "$category" == system ]]; then
+    [[ -z "$category" ]] && printf '# system\n'
+    envmgr_list_system "$machine_dir"
+  fi
+  if [[ "$category" == package ]]; then
+    envmgr_warn "listing packages is not implemented yet"
   fi
 }
 
-# Refresh the config result and marker after a command changed config state.
-envmgr_refresh_config_check() {
+# Refresh recorded results and the marker after a command changed state.
+envmgr_refresh_checks() {
   local machine_dir="$1"
 
-  envmgr_check_config "$machine_dir" >/dev/null || true
+  envmgr_check_config "$machine_dir" >/dev/null 2>&1 || true
+  envmgr_check_system "$machine_dir" >/dev/null 2>&1 || true
   envmgr_refresh_summary "$(basename -- "$machine_dir")"
 }
 
@@ -184,15 +190,18 @@ envmgr_cmd_restore() {
   local category=""
   local assume_yes=false
   local dry_run=false
+  local force=false
   local machine_dir=""
   local provider=""
   local targets=()
+  local units=()
   local rc=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --yes|-y) assume_yes=true ;;
       --dry-run|-n) dry_run=true ;;
+      --force) force=true ;;
       -*) envmgr_usage_error "unknown option for restore: $1" ;;
       *)
         if [[ -z "$category" && ${#targets[@]} -eq 0 ]]; then
@@ -204,26 +213,31 @@ envmgr_cmd_restore() {
         elif [[ "$category" == package ]]; then
           envmgr_usage_error "envmgr does not upgrade individual packages; see $ENVMGR_PARTIAL_UPGRADES_URL"
         else
-          envmgr_usage_error "restore accepts target arguments only for config"
+          units+=("$1")
         fi
         ;;
     esac
     shift
   done
 
+  [[ "$force" == false || "$category" == system ]] || \
+    envmgr_usage_error "--force applies only to restore system"
+
   machine_dir="$(envmgr_active_machine_dir refuse)"
-  # Order: package -> config -> system. Only config is implemented so far.
+  # Order: package -> config -> system. A phase that fails, is cancelled, or
+  # needs a reboot stops the run.
   if [[ -z "$category" || "$category" == package ]]; then
     envmgr_warn "package restore is not implemented yet${provider:+ ($provider)}"
   fi
   if [[ -z "$category" || "$category" == config ]]; then
     envmgr_restore_config "$machine_dir" "$assume_yes" "$dry_run" \
       ${targets[@]+"${targets[@]}"} || rc=$?
-    [[ "$dry_run" == true ]] || envmgr_refresh_config_check "$machine_dir"
   fi
-  if [[ -z "$category" || "$category" == system ]]; then
-    envmgr_warn "system restore is not implemented yet"
+  if [[ "$rc" -eq 0 && ( -z "$category" || "$category" == system ) ]]; then
+    envmgr_restore_system "$machine_dir" "$assume_yes" "$dry_run" "$force" \
+      ${units[@]+"${units[@]}"} || rc=$?
   fi
+  [[ "$dry_run" == true ]] || envmgr_refresh_checks "$machine_dir"
   return "$rc"
 }
 
@@ -253,7 +267,7 @@ envmgr_cmd_adopt() {
 
   machine_dir="$(envmgr_active_machine_dir refuse)"
   envmgr_adopt_config "$machine_dir" "$exact" "$encrypt" "${targets[@]}"
-  envmgr_refresh_config_check "$machine_dir"
+  envmgr_refresh_checks "$machine_dir"
 }
 
 envmgr_cmd_drop() {
@@ -285,6 +299,6 @@ envmgr_cmd_drop() {
 
   machine_dir="$(envmgr_active_machine_dir refuse)"
   envmgr_drop_config "$machine_dir" "$delete" "$assume_yes" "$dry_run" "${targets[@]}" || rc=$?
-  [[ "$dry_run" == true ]] || envmgr_refresh_config_check "$machine_dir"
+  [[ "$dry_run" == true ]] || envmgr_refresh_checks "$machine_dir"
   return "$rc"
 }

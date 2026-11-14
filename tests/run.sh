@@ -361,6 +361,155 @@ test_drop_unmanaged_target_fails() {
   assert_eq "$rc" 1 "$out"
 }
 
+# Create a unit: new_unit <name> <apply-body> [check-body]
+new_unit() {
+  local dir="$data/machines/mac/system/$1"
+
+  mkdir -p "$dir"
+  printf '#!/usr/bin/env bash\n# Unit %s\nset -euo pipefail\n%s\n' "$1" "$2" >"$dir/apply"
+  chmod +x "$dir/apply"
+  if [[ $# -ge 3 ]]; then
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n%s\n' "$3" >"$dir/check"
+    chmod +x "$dir/check"
+  fi
+}
+
+test_system_stamp_unit_lifecycle() {
+  selected_mac
+  new_unit 30-defaults 'echo applied >>"$HOME/applied.log"'
+  run_envmgr check system
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "drift    30-defaults"
+  assert_contains "$(cat "$HOME/.local/state/envmgr/change_summary")" "system.drift=1"
+
+  run_envmgr restore system --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$HOME/applied.log")" applied
+  run_envmgr check system
+  assert_eq "$rc" 0 "$out"
+  [[ ! -e "$HOME/.local/state/envmgr/change_summary" ]] || fail "marker not cleared"
+
+  # Already in sync: restore does not run it again.
+  run_envmgr restore system --yes
+  assert_contains "$out" "nothing to restore"
+  assert_eq "$(grep -c applied "$HOME/applied.log")" 1
+
+  # Editing the unit makes it drift.
+  printf '# changed\n' >>"$data/machines/mac/system/30-defaults/apply"
+  run_envmgr check system
+  assert_eq "$rc" 3 "$out"
+}
+
+test_system_watch_file() {
+  selected_mac
+  mkdir -p "$HOME/.config/app"
+  printf 'v1\n' >"$HOME/.config/app/a.conf"
+  new_unit 60-reload 'true'
+  printf '~/.config/app/*.conf\n' >"$data/machines/mac/system/60-reload/watch"
+  run_envmgr restore system --yes
+  assert_eq "$rc" 0 "$out"
+  run_envmgr check system
+  assert_eq "$rc" 0 "$out"
+  printf 'v2\n' >"$HOME/.config/app/a.conf"
+  run_envmgr check system
+  assert_eq "$rc" 3 "$out"
+}
+
+test_system_check_script() {
+  selected_mac
+  new_unit 50-service 'touch "$HOME/service"' '[[ -e "$HOME/service" ]] || exit 3'
+  run_envmgr check system
+  assert_eq "$rc" 3 "$out"
+  run_envmgr restore system --yes
+  assert_eq "$rc" 0 "$out"
+  run_envmgr check system
+  assert_eq "$rc" 0 "$out"
+  # Real checks see drift that stamps cannot.
+  rm "$HOME/service"
+  run_envmgr check system
+  assert_eq "$rc" 3 "$out"
+}
+
+test_system_check_error() {
+  selected_mac
+  new_unit 50-broken 'true' 'exit 7'
+  run_envmgr check system
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "error    50-broken"
+}
+
+test_system_reboot_stops_run() {
+  selected_mac
+  new_unit 10-first 'exit 75'
+  new_unit 20-second 'touch "$HOME/second"'
+  run_envmgr restore system --yes
+  assert_eq "$rc" 75 "$out"
+  assert_contains "$out" "requires a reboot"
+  [[ ! -e "$HOME/second" ]] || fail "later unit ran after reboot request"
+  run_envmgr check system
+  assert_eq "$rc" 3 "$out"
+}
+
+test_system_failure_stops_run() {
+  selected_mac
+  new_unit 10-first 'exit 4'
+  new_unit 20-second 'touch "$HOME/second"'
+  run_envmgr restore system --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "10-first failed (exit 4)"
+  [[ ! -e "$HOME/second" ]] || fail "later unit ran after failure"
+}
+
+test_system_select_force_and_dry_run() {
+  selected_mac
+  new_unit 10-one 'echo one >>"$HOME/log"'
+  new_unit 20-two 'echo two >>"$HOME/log"'
+  run_envmgr restore system two --yes --dry-run
+  assert_eq "$rc" 0 "$out"
+  [[ ! -e "$HOME/log" ]] || fail "dry run applied a unit"
+  run_envmgr restore system two --yes
+  assert_eq "$(cat "$HOME/log")" two
+  run_envmgr restore system 20-two --force --yes
+  assert_eq "$(cat "$HOME/log")" "two
+two"
+  run_envmgr restore system missing --yes
+  assert_eq "$rc" 1 "$out"
+  run_envmgr restore config --force
+  assert_eq "$rc" 2 "$out"
+}
+
+test_system_unit_environment_and_list() {
+  selected_mac
+  new_unit 40-env 'printf "%s|%s|%s\n" "$ENVMGR_MACHINE" "$(basename "$ENVMGR_UNIT_DIR")" "$PWD" >"$HOME/env"' 'exit 0'
+  run_envmgr list system
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "40-env"
+  assert_contains "$out" "check  Unit 40-env"
+  run_envmgr restore system --force --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$HOME/env")" "mac|40-env|$data/machines/mac/system/40-env"
+}
+
+test_system_non_executable_apply() {
+  selected_mac
+  new_unit 10-plain 'true'
+  chmod -x "$data/machines/mac/system/10-plain/apply"
+  run_envmgr restore system --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "not executable"
+}
+
+test_restore_runs_config_then_system() {
+  selected_mac
+  printf 'cfg\n' >"$cfg/dot_unitinput"
+  new_unit 50-reads-config 'cp "$HOME/.unitinput" "$HOME/copied"'
+  run_envmgr restore --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$HOME/copied")" cfg
+  run_envmgr check
+  assert_eq "$rc" 0 "$out"
+}
+
 # --- runner ----------------------------------------------------------------
 
 tests=()

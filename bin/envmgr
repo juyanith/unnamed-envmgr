@@ -30,6 +30,8 @@ source "$ENVMGR_ROOT/lib/envmgr/machine.sh"
 source "$ENVMGR_ROOT/lib/envmgr/summary.sh"
 # shellcheck source=lib/envmgr/config.sh
 source "$ENVMGR_ROOT/lib/envmgr/config.sh"
+# shellcheck source=lib/envmgr/system.sh
+source "$ENVMGR_ROOT/lib/envmgr/system.sh"
 # shellcheck source=lib/envmgr/commands.sh
 source "$ENVMGR_ROOT/lib/envmgr/commands.sh"
 
@@ -42,10 +44,11 @@ usage: envmgr <command> [arguments]
   check [config|package|system] [--offline]
   list [config|package|system]
   restore [config [target...]] [--yes] [--dry-run]
+  restore system [unit...] [--force] [--yes] [--dry-run]
   adopt config [--exact] target...
   drop config [--delete] [--yes] [--dry-run] target...
 
-Not yet implemented: setup, evaluate, migrate, packages, and system units.
+Not yet implemented: setup, evaluate, migrate, and packages.
 See DESIGN.md for the full command interface.
 EOF
 }

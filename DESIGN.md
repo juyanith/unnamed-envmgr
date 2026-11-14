@@ -63,7 +63,7 @@ machines/
   agent=codex
 ~/.local/state/envmgr/            # $XDG_STATE_HOME/envmgr
   change_summary
-  system/<unit>.applied           # stamps for units without a check script
+  system/<machine>/<unit>.applied # stamps for units without a check script
   backups/<timestamp>/...
 ```
 
@@ -286,24 +286,32 @@ machines/<id>/system/
     apply        # required: idempotent, may sudo, may exit 75
     check        # optional: read-only; 0 in sync, 3 drift, 1 error
     files/       # udev rules, launchd/systemd units, helpers
-  60-paneru/
+  90-hyprland-reload/
     apply
-    check
+    watch        # optional: targets whose changes re-run a stamp unit
 ```
 
-- Units run in lexical order. Envmgr sets `ENVMGR_UNIT_DIR`,
-  `ENVMGR_MACHINE_DIR`, `ENVMGR_DATA_DIR`, and `ENVMGR_MACHINE`.
-- The first comment line of `apply` is the unit's description, shown by
-  `list system`.
-- **`check system [unit...]`** runs each unit's `check`. A unit without a
-  `check` script uses a stamp: it is in sync when a hash of the unit
-  directory, plus the targets listed in an optional `watch` file, matches
-  `~/.local/state/envmgr/system/<unit>.applied`. The stamp form fits
-  restarts such as Paneru, which only need to run after their configuration
-  changes.
-- **`restore system [unit...]`** runs `apply` for units that are out of sync,
-  or for all selected units with `--force`. It writes the stamp after a
-  successful `apply`.
+- Units run in lexical order of their directory names. Envmgr runs `apply`
+  and `check` from the unit directory and sets `ENVMGR_UNIT_DIR`,
+  `ENVMGR_MACHINE_DIR`, `ENVMGR_DATA_DIR`, and `ENVMGR_MACHINE`. Both scripts
+  must be executable.
+- The first comment line of `apply` after the shebang is the unit's
+  description, shown by `list system`.
+- A unit argument may name the directory (`90-hyprland-reload`) or omit the
+  two-digit prefix (`hyprland-reload`).
+- **`check system`** runs each unit's `check`. Any exit code other than `0`
+  or `3` is an error, which makes `check` exit `1`. A unit without a `check`
+  script uses a stamp: it is in sync when a hash of every file in the unit
+  directory, plus the current contents of the targets listed in its `watch`
+  file, matches `~/.local/state/envmgr/system/<machine>/<unit>.applied`.
+  `watch` holds one path per line; `~/` and globs are expanded. Stamps fit
+  actions such as reloads and preference scripts, which only need to run
+  again after their inputs change.
+- **`restore system [unit...] [--force]`** runs `apply`, in order, for the
+  selected units that are out of sync, or for every selected unit with
+  `--force`. After a successful `apply` it writes the stamp. A unit that
+  exits `75` stops the run (the remaining units run on the next restore);
+  any other failure stops the run with exit `1`.
 - Units never prompt, apart from `sudo`. Interactive choices, such as Kanata
   keyboard selection, are made in the machine's files directly or through
   `evaluate`.
