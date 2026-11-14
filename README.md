@@ -56,16 +56,24 @@ afterward.
 
 ## Other commands
 
+`envmgr --help` lists every command with its options. The most common:
+
 ```sh
-envmgr adopt config ~/.config/example    # start managing a file or directory
-envmgr adopt config --from <id> ~/.x     # copy it from another machine that has it
-envmgr save                              # commit this machine's changes and push them
-envmgr adopt config --encrypt ~/.netrc   # secrets: stored only as age ciphertext
-envmgr evaluate [config|package|system]  # start the agent with the current check
-envmgr evaluate --from <id>              # start the agent to copy or merge config from it
-envmgr migrate <url>                     # move envmgr-data to a new, empty remote
-envmgr migrate --no-history <url>        # or move a clean copy of its current files
-envmgr migrate --follow <url>            # then, on every other machine
+envmgr adopt config ~/.config/example  # start managing a file or directory
+envmgr adopt config --encrypt ~/.netrc # secrets: stored only as ciphertext
+envmgr adopt config --from <id> ~/.x   # copy config only another machine has
+envmgr adopt package <provider> <pkg>  # add an installed package
+envmgr drop config [--delete] ~/.x     # stop managing (--delete removes it)
+envmgr drop package [--delete] <provider> <pkg>  # --delete uninstalls
+envmgr evaluate [config|package|system]  # start the agent with the check
+envmgr evaluate --from <id>            # start the agent to copy config from it
+envmgr init <id>                       # select an existing machine
+envmgr init --new <id> [--from <id>]   # create a machine, or copy another
+envmgr list [config|package|system]    # list what this machine manages
+envmgr migrate <url>                   # move envmgr-data to an empty remote
+envmgr migrate --no-history <url>      # or move a copy of its current files
+envmgr migrate --follow <url>          # then, on every other machine
+envmgr save                            # commit this machine's changes, push
 ```
 
 The first `--encrypt` creates `~/.config/envmgr/age.key`. Back it up and copy

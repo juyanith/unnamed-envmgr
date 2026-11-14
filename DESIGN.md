@@ -61,10 +61,15 @@ machines/
   data_url=git@github.com:juyanith/envmgr-data.git
   machine=mac-mini
   agent=codex
+~/.config/envmgr/age.key          # age identity; never committed
+~/.config/chezmoi/chezmoi.toml    # written by envmgr init (see Secrets)
 ~/.local/state/envmgr/            # $XDG_STATE_HOME/envmgr
   change_summary
+  check/<category>                # last recorded result per category
+  cache/                          # provider update metadata for offline checks
   system/<machine>/<unit>.applied # stamps for units without a check script
-  backups/<timestamp>/...
+  backups/<timestamp>/...         # targets replaced by restore config
+  backups/<label>-<timestamp>/    # files replaced by setup or init
 ```
 
 Both checkout paths are configurable during `envmgr setup`.
@@ -81,8 +86,9 @@ description=Mac mini, primary desk machine
 ```
 
 - `os` and `distribution` are required. Commands that change the system
-  (`restore`, `adopt`, `drop`) refuse to run when they do not match the
-  running system. `check`, `list`, and `evaluate` warn and continue.
+  (`restore`, `adopt`, `drop`), and `init`, refuse to run when they do not
+  match the running system. `check`, `list`, `evaluate`, and `save` warn and
+  continue.
 - A mismatch in the optional `architecture` field produces a warning.
 - Hardware is not a dimension. Hardware-specific settings live in the files
   of the machines that need them.
@@ -92,16 +98,19 @@ description=Mac mini, primary desk machine
 
 ```text
 envmgr setup
-envmgr init <id> | init --new <id> [--from <id>]
-envmgr check   [config|package|system]
-envmgr list    [config|package|system]
+envmgr init [--data <path>] <id> | init [--data <path>] --new <id> [--from <id>]
+envmgr check   [config|package [provider]|system] [--offline]
+envmgr list    [config|package [provider]|system]
 envmgr restore [config|package|system] [...]
 envmgr adopt   config|package ... | adopt config --from <id> target...
 envmgr drop    config|package ...
-envmgr evaluate [config|package|system] | evaluate --from <id> [target...]
+envmgr evaluate [config|package|system] [--offline]
+envmgr evaluate --from <id> [target...] [--offline]
 envmgr migrate [--no-history] <url> | migrate --follow <url>
 envmgr save [-m <message>] [--no-push]
 ```
+
+`envmgr --help` lists every form with its options and a one-line summary.
 
 - Every command acts on the active machine from `~/.config/envmgr/config`.
   If no machine is configured, the command exits with an error that suggests
@@ -111,7 +120,8 @@ envmgr save [-m <message>] [--no-push]
   because configuration and units depend on installed tools, and units may
   read restored targets. A phase that ends with `75` stops the run.
 - Commands that change the system print a preview and ask for confirmation.
-  `--yes` skips confirmation; `--dry-run` prints the preview and exits.
+  `--yes` (`-y`) skips confirmation; `--dry-run` (`-n`) prints the preview
+  and exits. Without `--yes`, confirmation needs a terminal.
 - Exit codes: `0` success or in sync; `1` error; `2` usage error; `3` check
   found drift; `75` reboot or re-login required before continuing.
 - Envmgr commits only in `save`, and only the active machine's directory.
@@ -168,13 +178,16 @@ complete:
 #### `envmgr init`
 
 - `init <id>` writes `machine=` to `~/.config/envmgr/config` and sets
-  `sourceDir` in `~/.config/chezmoi/chezmoi.toml`, after checking
-  `machine.conf`. It changes no targets, packages, or system state; run
-  `envmgr restore` next.
+  `sourceDir` in `~/.config/chezmoi/chezmoi.toml` (backing up a different
+  existing file), after checking `machine.conf`. It changes no targets,
+  packages, or system state; run `envmgr restore` next.
+- `--data <path>` records `data=` first, for a data checkout that `setup`
+  did not clone.
 - `init --new <id> [--from <id>]` creates `machines/<id>/` with detected
   metadata and an empty `config/`, `packages/`, `system/`, and `SPEC.md`.
   With `--from`, it copies those directories from another machine with the
   same `os` and `distribution`. Copies are owned independently from then on.
+  The new machine is then selected as with `init <id>`.
 
 #### `envmgr migrate`
 
@@ -259,8 +272,9 @@ state, which records the last content written to each target.
 - **No platform data.** There is no `.chezmoi.toml.tmpl`, no
   `[data.platform]`, and no platform-conditional `.chezmoiignore`.
 - **Files only.** Allowed attributes are `dot_`, `private_`, `executable_`,
-  `exact_`, `empty_`, `modify_`, and `encrypted_`. Chezmoi `run_` scripts are
-  not allowed; that work belongs in system units.
+  `exact_`, `empty_`, `symlink_`, `modify_`, and `encrypted_`. Chezmoi `run_`
+  scripts are not allowed; that work belongs in system units, and envmgr
+  excludes scripts from every Chezmoi status, diff, and apply.
 - **Partial ownership** uses `modify_` scripts. They must be deterministic and
   idempotent, and must preserve content they do not own. `exact_` is reserved
   for directories envmgr owns completely (for example, `~/.config/nvim`).
@@ -270,8 +284,8 @@ Commands:
 - **`check config`** reads `chezmoi status`. Column one (last written state
   versus actual) is reported as **local changes**; column two (actual versus
   source) as **pending restore**. Both count as drift.
-- **`list config`** prints targets and their kind: file, directory, `modify`,
-  or encrypted.
+- **`list config`** prints targets and their kind: file, directory, symlink,
+  `modify`, or encrypted.
 - **`restore config [target...]`** previews the diff, then confirms and
   applies. Every existing file that restore will change is first copied to
   `~/.local/state/envmgr/backups/<timestamp>/`, whether or not Chezmoi wrote
@@ -281,7 +295,9 @@ Commands:
   a directory, this covers every regular file and symlink currently inside
   it; later files are not managed until adopted. `--exact` warns that
   unmanaged files will be deleted on restore. Partial ownership is authored
-  as a `modify_` source, not adopted.
+  as a `modify_` source, not adopted; adopting a target that a `modify_`
+  source manages is refused. Adopting a target that is already managed
+  replaces its source with the current file.
 - **`adopt config --from <id> target...`** copies the sources that machine
   `<id>` has for the targets (every managed file at or under each one) into
   this machine's `config/`, with their names unchanged, so attributes carry
@@ -297,7 +313,8 @@ Commands:
 - **`drop config [--delete] target...`** runs `chezmoi forget`, which keeps
   local copies. With `--delete`, after confirmation, envmgr also deletes the
   managed files and then any managed directories left empty. Unmanaged files
-  and their directories are never deleted.
+  and their directories are never deleted. `--delete` is refused for a
+  `modify_` target, which envmgr owns only in part.
 
 ## Packages
 
@@ -339,10 +356,18 @@ envmgr drop    package [--delete] <provider> <package...>
 | `available` | The package manager exists. |
 | `bootstrap` | Install the package manager itself; may return `75`. |
 | `refresh` | Refresh metadata without changing installed state. |
+| `list` | Declared packages, one per line, with an optional kind (for example, `held` or `cask`). |
 | `missing` | Declared packages that are not installed. |
 | `pending` | A short description of what an upgrade would change, or nothing. |
 | `restore` | Install missing packages and perform the provider's upgrade; may return `75`. |
-| `adopt <pkg...>` / `uninstall <pkg...>` | Record or remove specific packages. |
+| `adopt <pkg...>` | Record installed packages in the manifest; refuse ones that are not installed. |
+| `forget <pkg...>` | Remove packages from the manifest. |
+| `uninstall <pkg...>` | Uninstall packages (`drop package --delete`). |
+
+Providers live in `lib/envmgr/providers/<name>.sh` and run with
+`ENVMGR_MANIFEST_DIR` set to `machines/<id>/packages/<provider>/`. A machine
+uses a provider when that directory exists. `restore` bootstraps a provider
+whose package manager is missing before restoring it.
 
 Providers run in this order: `git`, `rpm-ostree`, `omarchy`, `homebrew`,
 `flatpak`. `git` runs first so that the remaining providers, config, and
@@ -350,11 +375,11 @@ system phases use the freshly pulled tool and data.
 
 | Provider | Manifests | Upgrade unit | Notes |
 |---|---|---|---|
-| `rpm-ostree` | `packages` | Whole deployment (`rpm-ostree install --idempotent` for missing packages, then `rpm-ostree upgrade`, both staged into one pending deployment) | Returns `75` after staging. While a staged deployment is waiting for a reboot, restore stages nothing more and returns `75` again. Pending updates come from `rpm-ostree upgrade --check`. |
+| `rpm-ostree` | `packages` | Whole deployment (`rpm-ostree install --idempotent` for missing packages, then `rpm-ostree upgrade`, both staged into one pending deployment) | Returns `75` after staging. While a staged deployment is waiting for a reboot, restore stages nothing more and returns `75` again. Pending updates come from `rpm-ostree upgrade --check`. `drop --delete` runs `rpm-ostree uninstall`, which also needs a reboot. |
 | `omarchy` | `packages`, `aur`, `plugins` (`id url [position]`) | Whole system (`omarchy update`) | Runs `omarchy update` in the foreground when an update is pending, so the user answers its prompts. With `--yes`, envmgr stops before it with an error asking to rerun without `--yes`. Then runs `omarchy pkg add`, `omarchy pkg aur add`, and `omarchy plugin add/enable`. `adopt` sends packages listed by `pacman -Qm` to `aur`. Pending updates come from `checkupdates` (pacman-contrib) and are cached for offline checks. |
-| `homebrew` | `Brewfile` (formulae, casks, taps, `mas`), `hold`, optional `trusted-taps` | Declared entries: `brew bundle install --no-upgrade` installs missing entries, then declared outdated formulae and casks are upgraded | Taps in `trusted-taps` are tapped and passed to `brew trust` first. Formulae in `hold` are installed when missing and never upgraded (for example, Kanata HEAD, whose rebuild breaks macOS privacy grants). Removes group/other write permission from `$(brew --prefix)/share`. |
-| `flatpak` | `apps`, `remotes` (`name url`) | Declared apps and their runtimes (`flatpak update --user`) | User scope only. Missing apps install from the first remote listed in `remotes`. Updates are limited to declared apps; undeclared apps are ignored. |
-| `git` | `repos` (`url path [branch]`, branch defaults to `main`; `~/` allowed) | Each repository (`git fetch`, then `git merge --ff-only`) | Clones missing repositories. A checkout is pending only when `origin/<branch>` has commits it lacks. Restore skips, with a warning, a checkout that is on another branch, has uncommitted changes, or has unpushed commits. Every machine lists the tool checkout and the `envmgr-data` checkout here. `drop --delete` is refused; envmgr never deletes checkouts. |
+| `homebrew` | `Brewfile` (formulae, casks, taps, `mas`), `hold`, optional `trusted-taps` | Declared entries: `brew bundle install --no-upgrade` installs missing entries, then declared outdated formulae and casks are upgraded | Taps in `trusted-taps` are tapped and passed to `brew trust` first. Formulae in `hold` are installed when missing and never upgraded (for example, Kanata HEAD, whose rebuild breaks macOS privacy grants). Removes group/other write permission from `$(brew --prefix)/share`. `adopt` records installed formulae and casks; taps and `mas` entries are added to the `Brewfile` by hand. |
+| `flatpak` | `apps`, `remotes` (`name url`) | Declared apps and their runtimes (`flatpak update --user`) | User scope only. Missing apps install from the first remote listed in `remotes`. Updates are limited to declared apps; undeclared apps are ignored. Pending updates are cached for offline checks. |
+| `git` | `repos` (`url path [branch]`, branch defaults to `main`; `~/` allowed) | Each repository (`git fetch`, then `git merge --ff-only`) | Clones missing repositories. A checkout is pending only when `origin/<branch>` has commits it lacks. Restore skips, with a warning, a checkout that is on another branch, has uncommitted changes, or has unpushed commits. Every machine lists the tool checkout and the `envmgr-data` checkout here. `adopt` takes checkout paths and records each one's `origin` URL and current branch. `drop --delete` is refused; envmgr never deletes checkouts. |
 
 ## System units
 
@@ -374,7 +399,8 @@ machines/<id>/system/
   `ENVMGR_MACHINE_DIR`, `ENVMGR_DATA_DIR`, and `ENVMGR_MACHINE`. Both scripts
   must be executable.
 - The first comment line of `apply` after the shebang is the unit's
-  description, shown by `list system`.
+  description. `list system` shows each unit, whether it uses a `check`
+  script or a stamp, and its description.
 - A unit argument may name the directory (`90-hyprland-reload`) or omit the
   two-digit prefix (`hyprland-reload`).
 - **`check system`** runs each unit's `check`. Any exit code other than `0`
@@ -397,11 +423,12 @@ machines/<id>/system/
 
 ## Change summary
 
-`$XDG_STATE_HOME/envmgr/change_summary` exists only while there is drift. It
-is written atomically after every `check`, which refreshes all categories'
-entries. A category not requested in that run reuses its result from within
-the last 10 minutes when nothing it depends on has changed, and is otherwise
-re-checked offline.
+`$XDG_STATE_HOME/envmgr/change_summary` exists only while there is drift or
+an error. It is rebuilt atomically from the per-category results in
+`check/` after every `check`, which re-checks every category (the ones not
+requested silently, with packages offline), and after every `restore`,
+`adopt`, and `drop` (except with `--dry-run`), which re-check all categories
+offline.
 
 ```text
 machine=mac-mini
@@ -410,7 +437,9 @@ config.local=2
 config.pending=1
 package.missing=0
 package.pending=homebrew,flatpak
+package.errors=0
 system.drift=1
+system.errors=0
 ```
 
 ## `evaluate [category]`
@@ -421,19 +450,23 @@ repository root, with one appended argument: the initial prompt. The command
 is split on whitespace (quotes are not interpreted), and `evaluate` exits
 with the agent's exit code. The prompt contains:
 
-- the machine ID and the paths to `machine.conf`, `SPEC.md`, and the data
-  repository's `AGENTS.md`;
+- the machine ID and the paths to `machine.conf`, `SPEC.md`, the data
+  repository's `AGENTS.md`, and this `DESIGN.md`;
 - current `check` output for the selected categories, as paths and statuses,
   never file contents;
 - the approval boundary: the agent may edit `machines/<id>/` and repository
   documentation. It must not run `envmgr restore`, install packages, or
   commit.
 
+Without an `agent=` setting, or when its command is not on `PATH`,
+`evaluate` exits `1` with instructions.
+
 `evaluate --from <id> [target...] [--offline]` starts the agent to copy
 configuration from another machine to the selected one. (When none of the
-targets exist here yet, `adopt config --from` copies them without an agent.) Run it on the machine
-that receives the files, so the agent can look at the targets that already
-exist there and `envmgr save` commits the right directory afterward.
+targets exist here yet, `adopt config --from` copies them without an
+agent.) Run it on the machine that receives the files, so the agent can
+look at the targets that already exist there and `envmgr save` commits
+the right directory afterward.
 
 1. Unless `--offline` is given, fetch the data checkout and fast-forward it
    when it is clean, on the expected branch, and fully pushed (the same rule

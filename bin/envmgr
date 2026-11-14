@@ -50,24 +50,45 @@ envmgr_usage() {
   cat <<'EOF'
 usage: envmgr <command> [arguments]
 
-  setup
-  init [--data <path>] <machine-id>
-  init [--data <path>] --new <machine-id> [--from <machine-id>]
-  check [config|system|package [provider]] [--offline]
-  list [config|system|package [provider]]
-  restore [config [target...]] [--yes] [--dry-run]
-  restore system [unit...] [--force] [--yes] [--dry-run]
-  restore package [provider] [--yes] [--dry-run]
-  adopt config [--exact] [--encrypt] target...
-  adopt config --from <machine-id> target...
+Commands:
+  adopt config [--exact] [--encrypt] <target...>
+      Start managing files or directories in your home directory.
+  adopt config --from <machine-id> <target...>
+      Copy config from another machine; the targets must not exist here.
   adopt package <provider> <package...>
-  drop config [--delete] [--yes] [--dry-run] target...
+      Add installed packages to this machine's manifest.
+  check [config|package [provider]|system] [--offline]
+      Report drift from the data repository; exits 3 when there is drift.
+  drop config [--delete] [--yes] [--dry-run] <target...>
+      Stop managing targets; --delete also deletes the files.
   drop package [--delete] [--yes] [--dry-run] <provider> <package...>
-  evaluate [config|system|package] [--offline]
+      Remove packages from the manifest; --delete also uninstalls them.
+  evaluate [config|package|system] [--offline]
+      Start the configured agent with the current check report.
   evaluate --from <machine-id> [target...] [--offline]
-  save [-m <message>] [--no-push] [--yes] [--dry-run]
+      Start the agent to copy or merge config from another machine.
+  init [--data <path>] <machine-id>
+      Select an existing machine for this computer.
+  init [--data <path>] --new <machine-id> [--from <machine-id>]
+      Create a new machine, optionally copied from another one.
+  list [config|package [provider]|system]
+      List what this machine manages.
   migrate <url> [--no-history] [--yes] [--dry-run]
+      Move the data repository to a new, empty remote.
   migrate --follow <url> [--yes] [--dry-run]
+      Switch this machine's data checkout to the migrated remote.
+  restore [--yes] [--dry-run]
+      Restore packages, then config, then system units.
+  restore config [target...] [--yes] [--dry-run]
+      Apply config files to the home directory.
+  restore package [provider] [--yes] [--dry-run]
+      Install missing packages and upgrade each provider.
+  restore system [unit...] [--force] [--yes] [--dry-run]
+      Apply system units that are out of sync, or all of them with --force.
+  save [-m <message>] [--no-push] [--yes] [--dry-run]
+      Commit this machine's changes in the data repository and push them.
+  setup
+      Install prerequisites, clone the data repository, and select a machine.
 
 See DESIGN.md for the full command interface.
 EOF
