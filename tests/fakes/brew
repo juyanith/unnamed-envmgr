@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Fake Homebrew for tests. State files in $FAKE_BREW_STATE:
+#   formulae casks taps outdated-formulae outdated-casks log
+set -euo pipefail
+state="${FAKE_BREW_STATE:?}"
+touch "$state"/{formulae,casks,taps,outdated-formulae,outdated-casks,log}
+printf '%s\n' "$*" >>"$state/log"
+
+has() { grep -Fxq -- "$2" "$state/$1"; }
+add() { has "$1" "$2" || printf '%s\n' "$2" >>"$state/$1"; }
+del() { grep -Fxv -- "$2" "$state/$1" >"$state/$1.tmp" || true; mv "$state/$1.tmp" "$state/$1"; }
+
+case "$1" in
+  update) ;;
+  --prefix) printf '%s\n' "$state/prefix" ;;
+  tap) [[ $# -ge 2 ]] && add taps "$2" || cat "$state/taps" ;;
+  trust) ;;
+  list)
+    kind="${2#--}"; [[ "$kind" == formula ]] && file=formulae || file=casks
+    if [[ "${3:-}" == -1 ]]; then cat "$state/$file"; else has "$file" "$3"; fi
+    ;;
+  outdated) [[ "$2" == --formula ]] && cat "$state/outdated-formulae" || cat "$state/outdated-casks" ;;
+  bundle)
+    file="${4#--file=}"
+    while read -r kind name _; do
+      name="${name//\"/}"; name="${name%,}"
+      case "$kind" in
+        brew)
+          case " ${HOMEBREW_BUNDLE_BREW_SKIP:-} " in *" ${name##*/} "*) continue ;; esac
+          add formulae "${name##*/}" ;;
+        cask) add casks "$name" ;;
+        tap) add taps "$name" ;;
+      esac
+    done <"$file"
+    ;;
+  upgrade)
+    kind="$2"; shift 2
+    for name in "$@"; do
+      [[ "$kind" == --formula ]] && del outdated-formulae "${name##*/}" || del outdated-casks "$name"
+    done
+    ;;
+  uninstall) shift; for name in "$@"; do del formulae "$name"; del casks "$name"; done ;;
+  *) printf 'fake brew: unsupported: %s\n' "$*" >&2; exit 1 ;;
+esac

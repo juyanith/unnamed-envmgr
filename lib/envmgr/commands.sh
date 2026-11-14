@@ -113,6 +113,7 @@ envmgr_cmd_check() {
   local offline=false
   local machine_dir=""
   local machine=""
+  local provider=""
   local each=""
   local result=0
   local rc=0
@@ -122,26 +123,38 @@ envmgr_cmd_check() {
       --offline) offline=true ;;
       -*) envmgr_usage_error "unknown option for check: $1" ;;
       *)
-        [[ -z "$category" ]] || envmgr_usage_error "check takes at most one category"
-        category="$(envmgr_parse_category "$1")"
+        if [[ -z "$category" ]]; then
+          category="$(envmgr_parse_category "$1")"
+        elif [[ "$category" == package && -z "$provider" ]]; then
+          provider="$1"
+        else
+          envmgr_usage_error "unexpected argument for check: $1"
+        fi
         ;;
     esac
     shift
   done
-  # Metadata refresh is part of package checks, which are not implemented yet.
-  : "$offline"
 
   machine_dir="$(envmgr_active_machine_dir warn)"
   machine="$(basename -- "$machine_dir")"
 
   # Every check refreshes every implemented category, so the marker reflects
   # the whole machine; only the requested category is printed.
-  for each in config system; do
+  # Unrequested package checks run offline to stay fast.
+  for each in package config system; do
     rc=0
     if [[ -z "$category" || "$category" == "$each" ]]; then
-      "envmgr_check_$each" "$machine_dir" || rc=$?
+      if [[ "$each" == package ]]; then
+        envmgr_check_package "$machine_dir" "$offline" "$provider" || rc=$?
+      else
+        "envmgr_check_$each" "$machine_dir" || rc=$?
+      fi
     else
-      "envmgr_check_$each" "$machine_dir" >/dev/null 2>&1 || rc=$?
+      if [[ "$each" == package ]]; then
+        envmgr_check_package "$machine_dir" true >/dev/null 2>&1 || rc=$?
+      else
+        "envmgr_check_$each" "$machine_dir" >/dev/null 2>&1 || rc=$?
+      fi
       continue
     fi
     case "$rc" in
@@ -150,10 +163,6 @@ envmgr_cmd_check() {
       *) result=1 ;;
     esac
   done
-  if [[ -z "$category" || "$category" == package ]]; then
-    envmgr_warn "package checks are not implemented yet"
-  fi
-
   envmgr_refresh_summary "$machine"
   return "$result"
 }
@@ -162,12 +171,22 @@ envmgr_cmd_list() {
   local category=""
   local machine_dir=""
 
-  if [[ $# -gt 1 ]]; then
-    envmgr_usage_error "list takes at most one category"
-  elif [[ $# -eq 1 ]]; then
+  local provider=""
+
+  if [[ $# -ge 1 ]]; then
     category="$(envmgr_parse_category "$1")"
   fi
+  if [[ $# -eq 2 && "$category" == package ]]; then
+    provider="$2"
+  elif [[ $# -gt 1 ]]; then
+    envmgr_usage_error "list takes a category, and a provider for package"
+  fi
   machine_dir="$(envmgr_active_machine_dir warn)"
+
+  if [[ -z "$category" || "$category" == package ]]; then
+    [[ -z "$category" ]] && printf '# package\n'
+    envmgr_list_package "$machine_dir" "$provider"
+  fi
 
   if [[ -z "$category" || "$category" == config ]]; then
     [[ -z "$category" ]] && printf '# config\n'
@@ -177,15 +196,13 @@ envmgr_cmd_list() {
     [[ -z "$category" ]] && printf '# system\n'
     envmgr_list_system "$machine_dir"
   fi
-  if [[ "$category" == package ]]; then
-    envmgr_warn "listing packages is not implemented yet"
-  fi
 }
 
 # Refresh recorded results and the marker after a command changed state.
 envmgr_refresh_checks() {
   local machine_dir="$1"
 
+  envmgr_check_package "$machine_dir" true >/dev/null 2>&1 || true
   envmgr_check_config "$machine_dir" >/dev/null 2>&1 || true
   envmgr_check_system "$machine_dir" >/dev/null 2>&1 || true
   envmgr_refresh_summary "$(basename -- "$machine_dir")"
@@ -232,9 +249,9 @@ envmgr_cmd_restore() {
   # Order: package -> config -> system. A phase that fails, is cancelled, or
   # needs a reboot stops the run.
   if [[ -z "$category" || "$category" == package ]]; then
-    envmgr_warn "package restore is not implemented yet${provider:+ ($provider)}"
+    envmgr_restore_package "$machine_dir" "$assume_yes" "$dry_run" "$provider" || rc=$?
   fi
-  if [[ -z "$category" || "$category" == config ]]; then
+  if [[ "$rc" -eq 0 && ( -z "$category" || "$category" == config ) ]]; then
     envmgr_restore_config "$machine_dir" "$assume_yes" "$dry_run" \
       ${targets[@]+"${targets[@]}"} || rc=$?
   fi
@@ -256,7 +273,13 @@ envmgr_cmd_adopt() {
   [[ $# -gt 0 ]] && shift
   case "$category" in
     config) ;;
-    package) envmgr_die 1 "adopting packages is not implemented yet" ;;
+    package)
+      [[ $# -ge 2 ]] || envmgr_usage_error "adopt package requires a provider and at least one package"
+      machine_dir="$(envmgr_active_machine_dir refuse)"
+      envmgr_adopt_package "$machine_dir" "$@"
+      envmgr_refresh_checks "$machine_dir"
+      return 0
+      ;;
     *) envmgr_usage_error "adopt requires a category: config or package" ;;
   esac
   while [[ $# -gt 0 ]]; do
@@ -287,7 +310,10 @@ envmgr_cmd_drop() {
   [[ $# -gt 0 ]] && shift
   case "$category" in
     config) ;;
-    package) envmgr_die 1 "dropping packages is not implemented yet" ;;
+    package)
+      envmgr_cmd_drop_package "$@"
+      return
+      ;;
     *) envmgr_usage_error "drop requires a category: config or package" ;;
   esac
   while [[ $# -gt 0 ]]; do
@@ -304,6 +330,42 @@ envmgr_cmd_drop() {
 
   machine_dir="$(envmgr_active_machine_dir refuse)"
   envmgr_drop_config "$machine_dir" "$delete" "$assume_yes" "$dry_run" "${targets[@]}" || rc=$?
+  [[ "$dry_run" == true ]] || envmgr_refresh_checks "$machine_dir"
+  return "$rc"
+}
+
+envmgr_cmd_drop_package() {
+  local delete=false
+  local assume_yes=false
+  local dry_run=false
+  local provider=""
+  local machine_dir=""
+  local packages=()
+  local rc=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --delete) delete=true ;;
+      --yes|-y) assume_yes=true ;;
+      --dry-run|-n) dry_run=true ;;
+      -*) envmgr_usage_error "unknown option for drop package: $1" ;;
+      *)
+        if [[ -z "$provider" ]]; then
+          provider="$1"
+        else
+          packages+=("$1")
+        fi
+        ;;
+    esac
+    shift
+  done
+  [[ -n "$provider" && ${#packages[@]} -gt 0 ]] || \
+    envmgr_usage_error "drop package requires a provider and at least one package"
+  envmgr_known_provider "$provider" || envmgr_usage_error "unknown provider: $provider"
+
+  machine_dir="$(envmgr_active_machine_dir refuse)"
+  envmgr_drop_package "$machine_dir" "$provider" "$delete" "$assume_yes" "$dry_run" \
+    "${packages[@]}" || rc=$?
   [[ "$dry_run" == true ]] || envmgr_refresh_checks "$machine_dir"
   return "$rc"
 }

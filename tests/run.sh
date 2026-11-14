@@ -510,6 +510,189 @@ test_restore_runs_config_then_system() {
   assert_eq "$rc" 0 "$out"
 }
 
+use_fake_brew() {
+  export FAKE_BREW_STATE="$work/brew"
+  mkdir -p "$FAKE_BREW_STATE"
+  export PATH="$root/tests/fakes:$PATH"
+  pkgs="$data/machines/mac/packages"
+  mkdir -p "$pkgs/homebrew"
+}
+
+test_homebrew_missing_and_restore() {
+  selected_mac
+  use_fake_brew
+  printf 'jq\n' >"$FAKE_BREW_STATE/formulae"
+  cat >"$pkgs/homebrew/Brewfile" <<'BREW'
+tap "devsunb/tap"
+brew "jq"
+brew "devsunb/tap/kanata-vk-agent"
+cask "zed"
+BREW
+  run_envmgr check package --offline
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "missing  devsunb/tap/kanata-vk-agent"
+  assert_contains "$out" "missing  zed (cask)"
+  assert_contains "$out" "missing  devsunb/tap (tap)"
+  assert_contains "$(cat "$HOME/.local/state/envmgr/change_summary")" "package.missing=3"
+
+  run_envmgr restore package --yes
+  assert_eq "$rc" 0 "$out"
+  run_envmgr check package
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$FAKE_BREW_STATE/log")" "update --quiet"
+}
+
+test_homebrew_upgrades_and_holds() {
+  selected_mac
+  use_fake_brew
+  printf 'jq\nkanata\n' >"$FAKE_BREW_STATE/formulae"
+  printf 'jq\nkanata\n' >"$FAKE_BREW_STATE/outdated-formulae"
+  printf 'brew "jq"\nbrew "kanata", args: ["HEAD"]\n' >"$pkgs/homebrew/Brewfile"
+  printf 'kanata\n' >"$pkgs/homebrew/hold"
+
+  run_envmgr list package
+  assert_contains "$out" "kanata  (held)"
+  run_envmgr check package
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "pending  jq"
+  [[ "$out" != *"pending  kanata"* ]] || fail "held formula reported as pending"
+  assert_contains "$(cat "$HOME/.local/state/envmgr/change_summary")" "package.pending=homebrew"
+
+  run_envmgr restore package homebrew --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$FAKE_BREW_STATE/log")" "upgrade --formula jq"
+  [[ "$(cat "$FAKE_BREW_STATE/log")" != *"upgrade --formula kanata"* ]] || fail "held formula upgraded"
+  run_envmgr check package
+  assert_eq "$rc" 0 "$out"
+}
+
+test_homebrew_adopt_and_drop() {
+  selected_mac
+  use_fake_brew
+  printf 'wget\n' >"$FAKE_BREW_STATE/formulae"
+  printf 'zed\n' >"$FAKE_BREW_STATE/casks"
+  run_envmgr adopt package homebrew wget zed
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$pkgs/homebrew/Brewfile")" 'brew "wget"
+cask "zed"'
+  run_envmgr adopt package homebrew missing-thing
+  assert_eq "$rc" 1 "$out"
+
+  run_envmgr drop package homebrew wget
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$pkgs/homebrew/Brewfile")" 'cask "zed"'
+  grep -Fxq wget "$FAKE_BREW_STATE/formulae" || fail "drop without --delete uninstalled"
+  run_envmgr drop package --delete --yes homebrew zed
+  assert_eq "$rc" 0 "$out"
+  ! grep -Fxq zed "$FAKE_BREW_STATE/casks" || fail "drop --delete did not uninstall"
+}
+
+test_package_rejects_unknown_provider_directory() {
+  selected_mac
+  mkdir -p "$data/machines/mac/packages/apt"
+  run_envmgr check package
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "unknown provider directory"
+}
+
+# Create a bare origin with one commit and print its path.
+make_origin() {
+  local origin="$work/origins/$1.git"
+  local seed="$work/seed-$1"
+
+  git init -q --bare -b main "$origin"
+  git init -q -b main "$seed"
+  printf 'one\n' >"$seed/file"
+  git -C "$seed" add file
+  git -C "$seed" -c user.name=t -c user.email=t@t commit -qm one
+  git -C "$seed" remote add origin "$origin"
+  git -C "$seed" push -q origin main
+  printf '%s\n' "$origin"
+}
+
+push_commit() {
+  local seed="$work/seed-$1"
+
+  printf '%s\n' "$2" >>"$seed/file"
+  git -C "$seed" -c user.name=t -c user.email=t@t commit -qam "$2"
+  git -C "$seed" push -q origin main
+}
+
+test_git_provider_clone_and_fast_forward() {
+  selected_mac
+  local origin=""
+  origin="$(make_origin tool)"
+  mkdir -p "$data/machines/mac/packages/git"
+  printf '%s ~/src/tool main\n' "$origin" >"$data/machines/mac/packages/git/repos"
+
+  run_envmgr check package git
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "missing  ~/src/tool"
+  run_envmgr restore package --yes
+  assert_eq "$rc" 0 "$out"
+  [[ -f "$HOME/src/tool/file" ]] || fail "repository not cloned"
+
+  push_commit tool two
+  run_envmgr check package
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "pending  ~/src/tool: 1 commit(s) behind"
+  run_envmgr restore package --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$HOME/src/tool/file")" two
+
+  # Local edits block the fast-forward but do not fail the restore.
+  push_commit tool three
+  printf 'local\n' >>"$HOME/src/tool/file"
+  run_envmgr check package
+  assert_contains "$out" "blocked by uncommitted changes"
+  run_envmgr restore package --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "not updated: uncommitted changes"
+  [[ "$(cat "$HOME/src/tool/file")" != *three* ]] || fail "dirty checkout was updated"
+}
+
+test_git_provider_adopt() {
+  selected_mac
+  local origin=""
+  origin="$(make_origin lib)"
+  git clone -q "$origin" "$HOME/src/lib"
+  mkdir -p "$data/machines/mac/packages/git"
+  run_envmgr adopt package git ~/src/lib
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$data/machines/mac/packages/git/repos")" "$origin ~/src/lib main"
+  run_envmgr drop package --delete --yes git ~/src/lib
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "does not delete Git checkouts"
+}
+
+test_restore_reexecutes_after_data_update() {
+  local origin=""
+  origin="$(make_origin data)"
+  # The data repository itself is a checkout of the origin.
+  rm -rf "$data"
+  git clone -q "$origin" "$data"
+  mkdir -p "$data/machines/mac/config" "$data/machines/mac/packages/git"
+  printf 'os=darwin\ndistribution=macos\n' >"$data/machines/mac/machine.conf"
+  printf '%s %s main\n' "$origin" "$data" >"$data/machines/mac/packages/git/repos"
+  git -C "$data" add -A
+  git -C "$data" -c user.name=t -c user.email=t@t commit -qm machine
+  git -C "$data" push -q origin main
+  run_envmgr init --data "$data" mac
+
+  # Another machine pushes a new config file.
+  git clone -q "$origin" "$work/other"
+  mkdir -p "$work/other/machines/mac/config"
+  printf 'pulled\n' >"$work/other/machines/mac/config/dot_pulled"
+  git -C "$work/other" add -A
+  git -C "$work/other" -c user.name=t -c user.email=t@t commit -qm pulled
+  git -C "$work/other" push -q origin main
+
+  run_envmgr restore --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "restarting restore"
+  assert_eq "$(cat "$HOME/.pulled")" pulled
+}
+
 # --- runner ----------------------------------------------------------------
 
 tests=()
@@ -526,6 +709,7 @@ for test_bash in "${shells[@]}"; do
       unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME
       export ENVMGR_OS=darwin ENVMGR_DISTRIBUTION=macos ENVMGR_ARCHITECTURE=apple-silicon
       data="$work/data"
+      export work
       mkdir -p "$HOME" "$data/machines"
       cd "$work"
       "$name"

@@ -242,7 +242,8 @@ envmgr drop    package [--delete] <provider> <package...>
   with code `2` and this message: `envmgr does not upgrade individual
   packages; see
   https://wiki.archlinux.org/title/System_maintenance#Partial_upgrades_are_unsupported`.
-- **`check package [provider]`** refreshes the provider's metadata (for
+- **`check package [provider]`** (and any `check` that includes packages)
+  refreshes the provider's metadata (for
   example, `brew update`, `git fetch`, or a temporary pacman database
   through `checkupdates`). It never changes installed state. It reports
   missing declared packages and pending upgrades, and both count as drift.
@@ -274,9 +275,9 @@ system phases use the freshly pulled tool and data.
 |---|---|---|---|
 | `rpm-ostree` | `packages` | Whole deployment (`rpm-ostree upgrade`, plus layering missing packages in the same transaction) | Returns `75` when a deployment is staged. |
 | `omarchy` | `packages`, `aur`, `plugins` (`id url [position]`) | Whole system (`omarchy update`) | Runs `omarchy update` in the foreground when an update is pending, so the user answers its prompts. With `--yes`, envmgr stops before it with an error asking to rerun without `--yes`. Then runs `omarchy pkg add`, `omarchy pkg aur add`, and `omarchy plugin add/enable`. `adopt` sends packages listed by `pacman -Qm` to `aur`. |
-| `homebrew` | `Brewfile` (formulae, casks, taps, `mas`), `hold` | Declared entries (`brew bundle install`) | Formulae in `hold` are installed when missing and never upgraded (for example, Kanata HEAD, whose rebuild breaks macOS privacy grants). Removes group/other write permission from `$(brew --prefix)/share`. |
+| `homebrew` | `Brewfile` (formulae, casks, taps, `mas`), `hold`, optional `trusted-taps` | Declared entries: `brew bundle install --no-upgrade` installs missing entries, then declared outdated formulae and casks are upgraded | Taps in `trusted-taps` are tapped and passed to `brew trust` first. Formulae in `hold` are installed when missing and never upgraded (for example, Kanata HEAD, whose rebuild breaks macOS privacy grants). Removes group/other write permission from `$(brew --prefix)/share`. |
 | `flatpak` | `apps`, `remotes` (`name url`) | Declared apps and their runtimes (`flatpak update --user`) | User scope only. |
-| `git` | `repos` (`url path branch`) | Each repository (`git fetch`, then `git pull --ff-only`) | Clones missing repositories. Skips and reports a checkout that is dirty, has unpushed commits, has diverged, or is on another branch. Every machine lists the tool checkout and the `envmgr-data` checkout here. |
+| `git` | `repos` (`url path [branch]`, branch defaults to `main`; `~/` allowed) | Each repository (`git fetch`, then `git merge --ff-only`) | Clones missing repositories. A checkout is pending only when `origin/<branch>` has commits it lacks. Restore skips, with a warning, a checkout that is on another branch, has uncommitted changes, or has unpushed commits. Every machine lists the tool checkout and the `envmgr-data` checkout here. `drop --delete` is refused; envmgr never deletes checkouts. |
 
 ## System units
 

@@ -13,6 +13,10 @@ separate data repository. Read `DESIGN.md` before making changes.
   invoke with `||`, check failures explicitly, because `set -e` does not
   apply there.
 - Parse `key=value` files with `envmgr_kv_get`; never source data files.
+- Package providers live in `lib/envmgr/providers/<name>.sh` and implement
+  the operations listed at the top of `lib/envmgr/package.sh`. Provider
+  operations run inside `if` and `||` contexts, so they must return non-zero
+  explicitly on failure. Test providers with fakes in `tests/fakes/`.
 - Keep commands idempotent. Commands that change the system preview first and
   confirm, unless `--yes` is given.
 - Add or update tests in `tests/run.sh` for every behavior change, and run the

@@ -30,6 +30,9 @@ source "$ENVMGR_ROOT/lib/envmgr/machine.sh"
 source "$ENVMGR_ROOT/lib/envmgr/summary.sh"
 # shellcheck source=lib/envmgr/config.sh
 source "$ENVMGR_ROOT/lib/envmgr/config.sh"
+# shellcheck source=lib/envmgr/package.sh
+source "$ENVMGR_ROOT/lib/envmgr/package.sh"
+envmgr_load_providers
 # shellcheck source=lib/envmgr/system.sh
 source "$ENVMGR_ROOT/lib/envmgr/system.sh"
 # shellcheck source=lib/envmgr/commands.sh
@@ -41,20 +44,27 @@ usage: envmgr <command> [arguments]
 
   init [--data <path>] <machine-id>
   init [--data <path>] --new <machine-id> [--from <machine-id>]
-  check [config|package|system] [--offline]
-  list [config|package|system]
+  check [config|system|package [provider]] [--offline]
+  list [config|system|package [provider]]
   restore [config [target...]] [--yes] [--dry-run]
   restore system [unit...] [--force] [--yes] [--dry-run]
+  restore package [provider] [--yes] [--dry-run]
   adopt config [--exact] target...
+  adopt package <provider> <package...>
   drop config [--delete] [--yes] [--dry-run] target...
+  drop package [--delete] [--yes] [--dry-run] <provider> <package...>
 
-Not yet implemented: setup, evaluate, migrate, and packages.
+Not yet implemented: setup, evaluate, migrate, and the omarchy, flatpak, and
+rpm-ostree providers.
 See DESIGN.md for the full command interface.
 EOF
 }
 
 main() {
   local command="${1:-}"
+
+  # Kept for re-execution after the git provider updates envmgr or its data.
+  ENVMGR_ARGS=("$@")
 
   [[ $# -gt 0 ]] && shift
   case "$command" in
