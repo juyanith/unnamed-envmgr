@@ -313,3 +313,30 @@ envmgr_manifest_filter() {
   awk -v names="$*" "$program" "$file" >"$tmp"
   mv -f -- "$tmp" "$file"
 }
+
+# Providers cache update metadata during refresh so pending works offline.
+envmgr_pkg_cache() {
+  local file=""
+
+  file="$(envmgr_state_dir)/cache/$1"
+  mkdir -p -- "$(dirname -- "$file")"
+  printf '%s\n' "$file"
+}
+
+# Print non-comment, non-blank first fields of a manifest file.
+envmgr_manifest_names() {
+  [[ -f "$1" ]] || return 0
+  awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$1"
+}
+
+# Remove entries whose first field matches any given name.
+envmgr_manifest_forget() {
+  local file="$1"
+
+  shift
+  envmgr_manifest_filter "$file" '
+    BEGIN { n = split(names, list, " "); for (i = 1; i <= n; i++) drop[list[i]] = 1 }
+    /^[[:space:]]*(#|$)/ { print; next }
+    !($1 in drop) { print }
+  ' "$@"
+}

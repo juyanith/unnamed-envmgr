@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fake sudo for tests: run the command as the current user.
+exec "$@"

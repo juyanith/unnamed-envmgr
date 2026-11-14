@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Fake flatpak (user scope). State in $FAKE_STATE: flatpak-apps,
+# flatpak-remotes, flatpak-updates; commands are logged to log.
+set -euo pipefail
+state="${FAKE_STATE:?}"
+touch "$state"/flatpak-{apps,remotes,updates}
+printf 'flatpak %s\n' "$*" >>"$state/log"
+names() { for arg in "$@"; do [[ "$arg" == -* ]] || printf '%s\n' "$arg"; done; }
+case "$1" in
+  list) cat "$state/flatpak-apps" ;;
+  remote-ls) cat "$state/flatpak-updates" ;;
+  remote-add) names "${@:2}" | head -1 >>"$state/flatpak-remotes" ;;
+  info) grep -Fxq -- "$3" "$state/flatpak-apps" ;;
+  install)
+    remote="$(names "${@:2}" | head -1)"
+    grep -Fxq -- "$remote" "$state/flatpak-remotes" || { echo "no remote $remote" >&2; exit 1; }
+    names "${@:2}" | tail -n +2 >>"$state/flatpak-apps" ;;
+  update)
+    for app in $(names "${@:2}"); do
+      grep -Fxv -- "$app" "$state/flatpak-updates" >"$state/u.tmp" || true
+      mv "$state/u.tmp" "$state/flatpak-updates"
+    done ;;
+  uninstall)
+    for app in $(names "${@:2}"); do
+      grep -Fxv -- "$app" "$state/flatpak-apps" >"$state/a.tmp" || true
+      mv "$state/a.tmp" "$state/flatpak-apps"
+    done ;;
+  *) printf 'fake flatpak: unsupported: %s\n' "$*" >&2; exit 1 ;;
+esac

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Fake rpm-ostree. State in $FAKE_STATE: rpm-installed (booted packages),
+# rpm-staged (layered in the staged deployment), ostree-update (non-empty
+# when an upgrade is available), ostree-pending (exists when staged).
+set -euo pipefail
+state="${FAKE_STATE:?}"
+touch "$state"/{rpm-installed,rpm-staged,ostree-update}
+printf 'rpm-ostree %s\n' "$*" >>"$state/log"
+case "$1" in
+  status) [[ -e "$state/ostree-pending" ]] && exit 77; exit 0 ;;
+  upgrade)
+    if [[ "${2:-}" == --check ]]; then [[ -s "$state/ostree-update" ]] || exit 77; exit 0; fi
+    : >"$state/ostree-update"; touch "$state/ostree-pending" ;;
+  install)
+    for arg in "${@:2}"; do [[ "$arg" == -* ]] || printf '%s\n' "$arg" >>"$state/rpm-staged"; done
+    touch "$state/ostree-pending" ;;
+  uninstall) touch "$state/ostree-pending" ;;
+  *) printf 'fake rpm-ostree: unsupported: %s\n' "$*" >&2; exit 1 ;;
+esac

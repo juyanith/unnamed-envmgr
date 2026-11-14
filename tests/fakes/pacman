@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Fake pacman. State in $FAKE_STATE: pacman-repo, pacman-aur (installed names).
+set -euo pipefail
+state="${FAKE_STATE:?}"
+touch "$state"/pacman-{repo,aur}
+case "$1" in
+  -Qq)
+    if [[ $# -eq 1 ]]; then cat "$state"/pacman-{repo,aur}; exit 0; fi
+    grep -Fxq -- "$2" "$state/pacman-repo" "$state/pacman-aur" ;;
+  -Qmq)
+    if [[ $# -eq 1 ]]; then cat "$state/pacman-aur"; exit 0; fi
+    grep -Fxq -- "$2" "$state/pacman-aur" ;;
+  *) printf 'fake pacman: unsupported: %s\n' "$*" >&2; exit 1 ;;
+esac

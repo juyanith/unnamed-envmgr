@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Fake omarchy. Logs to $FAKE_STATE/log and updates the fake pacman state.
+set -euo pipefail
+state="${FAKE_STATE:?}"
+printf 'omarchy %s\n' "$*" >>"$state/log"
+case "$1 ${2:-}" in
+  "update ") : >"$state/updates" ;;
+  "pkg add") shift 2; printf '%s\n' "$@" >>"$state/pacman-repo" ;;
+  "pkg aur")
+    [[ "$3" == add ]] || exit 1
+    shift 3; printf '%s\n' "$@" >>"$state/pacman-aur" ;;
+  "pkg remove")
+    shift 2
+    for name in "$@"; do
+      for file in pacman-repo pacman-aur; do
+        grep -Fxv -- "$name" "$state/$file" >"$state/$file.tmp" || true
+        mv "$state/$file.tmp" "$state/$file"
+      done
+    done ;;
+  "plugin add")
+    id="$(basename -- "$3" .git)"
+    mkdir -p "$HOME/.config/omarchy/plugins/$id"
+    printf '{}\n' >"$HOME/.config/omarchy/plugins/$id/manifest.json" ;;
+  "plugin enable") ;;
+  *) printf 'fake omarchy: unsupported: %s\n' "$*" >&2; exit 1 ;;
+esac

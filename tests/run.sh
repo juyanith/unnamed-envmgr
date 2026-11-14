@@ -693,6 +693,169 @@ test_restore_reexecutes_after_data_update() {
   assert_eq "$(cat "$HOME/.pulled")" pulled
 }
 
+# Select a Linux machine whose providers all use the fakes in tests/fakes.
+selected_linux() {
+  export ENVMGR_OS=linux ENVMGR_DISTRIBUTION="$1"
+  export FAKE_STATE="$work/fake"
+  mkdir -p "$FAKE_STATE"
+  touch "$FAKE_STATE/log"
+  export PATH="$root/tests/fakes:$PATH"
+  new_fixture linux "$1" linux
+  run_envmgr init --data "$data" linux
+  assert_eq "$rc" 0 "$out"
+  pkgs="$data/machines/linux/packages"
+}
+
+test_omarchy_missing_and_restore() {
+  selected_linux omarchy
+  mkdir -p "$pkgs/omarchy"
+  printf 'git\n# comment\nzsh\n' >"$pkgs/omarchy/packages"
+  printf 'fresh-editor-bin\n' >"$pkgs/omarchy/aur"
+  printf 'OmaProton https://github.com/example/OmaProton.git\n' >"$pkgs/omarchy/plugins"
+  printf 'git\n' >"$FAKE_STATE/pacman-repo"
+
+  run_envmgr list package
+  assert_contains "$out" "omarchy     fresh-editor-bin  (aur)"
+  assert_contains "$out" "omarchy     OmaProton  (plugin)"
+  run_envmgr check package
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "missing  zsh"
+  assert_contains "$out" "missing  fresh-editor-bin (aur)"
+  assert_contains "$out" "missing  OmaProton (plugin)"
+
+  run_envmgr restore package --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$FAKE_STATE/log")" "omarchy pkg add zsh"
+  assert_contains "$(cat "$FAKE_STATE/log")" "omarchy pkg aur add fresh-editor-bin"
+  assert_contains "$(cat "$FAKE_STATE/log")" "omarchy plugin add https://github.com/example/OmaProton.git --enable --yes"
+  run_envmgr check package
+  assert_eq "$rc" 0 "$out"
+  run_envmgr restore package --yes
+  assert_contains "$out" "nothing to restore"
+}
+
+test_omarchy_system_update_is_interactive() {
+  selected_linux omarchy
+  mkdir -p "$pkgs/omarchy"
+  printf 'git\n' >"$pkgs/omarchy/packages"
+  printf 'git\n' >"$FAKE_STATE/pacman-repo"
+  printf 'linux 6.1-1 -> 6.2-1\nmesa 1 -> 2\n' >"$FAKE_STATE/updates"
+
+  run_envmgr check package
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "pending  system update (2 package(s))"
+  run_envmgr check package --offline
+  assert_contains "$out" "pending  system update (2 package(s))"
+
+  run_envmgr restore package --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "rerun envmgr restore without --yes"
+  [[ "$(cat "$FAKE_STATE/log")" != *"omarchy update"* ]] || fail "ran omarchy update with --yes"
+
+  run_envmgr restore package omarchy zsh
+  assert_eq "$rc" 2 "$out"
+  assert_contains "$out" "System_maintenance#Partial_upgrades_are_unsupported"
+}
+
+test_omarchy_adopt_sorts_aur_and_drop() {
+  selected_linux omarchy
+  printf 'ripgrep\n' >"$FAKE_STATE/pacman-repo"
+  printf 'kanata-bin\n' >"$FAKE_STATE/pacman-aur"
+  run_envmgr adopt package omarchy ripgrep kanata-bin
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$pkgs/omarchy/packages")" ripgrep
+  assert_eq "$(cat "$pkgs/omarchy/aur")" kanata-bin
+  run_envmgr adopt package omarchy ripgrep
+  assert_contains "$out" "already declared"
+  run_envmgr adopt package omarchy not-installed
+  assert_eq "$rc" 1 "$out"
+
+  run_envmgr drop package --delete --yes omarchy kanata-bin
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$pkgs/omarchy/aur")" ""
+  ! grep -Fxq kanata-bin "$FAKE_STATE/pacman-aur" || fail "drop --delete did not uninstall"
+}
+
+test_flatpak_install_and_update() {
+  selected_linux fedora-cosmic-atomic
+  mkdir -p "$pkgs/flatpak"
+  printf 'flathub https://dl.flathub.org/repo/flathub.flatpakrepo\n' >"$pkgs/flatpak/remotes"
+  printf 'dev.zed.Zed\ncom.visualstudio.code\n' >"$pkgs/flatpak/apps"
+  printf 'com.visualstudio.code\norg.example.Undeclared\n' >"$FAKE_STATE/flatpak-apps"
+  printf 'com.visualstudio.code\norg.example.Undeclared\n' >"$FAKE_STATE/flatpak-updates"
+
+  run_envmgr check package
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "missing  dev.zed.Zed"
+  assert_contains "$out" "pending  com.visualstudio.code"
+  [[ "$out" != *"org.example.Undeclared"* ]] || fail "undeclared app reported"
+
+  run_envmgr restore package --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$FAKE_STATE/log")" "flatpak remote-add --user --if-not-exists flathub"
+  assert_contains "$(cat "$FAKE_STATE/log")" "flatpak install --user --noninteractive flathub dev.zed.Zed"
+  assert_contains "$(cat "$FAKE_STATE/log")" "flatpak update --user --noninteractive com.visualstudio.code"
+  [[ "$(cat "$FAKE_STATE/log")" != *"update --user --noninteractive org.example"* ]] || \
+    fail "updated an undeclared app"
+  run_envmgr check package
+  assert_eq "$rc" 0 "$out"
+}
+
+test_flatpak_adopt_and_drop() {
+  selected_linux fedora-cosmic-atomic
+  printf 'dev.zed.Zed\n' >"$FAKE_STATE/flatpak-apps"
+  run_envmgr adopt package flatpak dev.zed.Zed
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$pkgs/flatpak/apps")" dev.zed.Zed
+  run_envmgr drop package --delete --yes flatpak dev.zed.Zed
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$FAKE_STATE/flatpak-apps")" ""
+}
+
+test_rpm_ostree_stages_and_requests_reboot() {
+  selected_linux fedora-cosmic-atomic
+  mkdir -p "$pkgs/rpm-ostree"
+  printf 'zsh\nkanata\n' >"$pkgs/rpm-ostree/packages"
+  printf 'zsh\n' >"$FAKE_STATE/rpm-installed"
+  printf 'available\n' >"$FAKE_STATE/ostree-update"
+
+  run_envmgr check package
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "missing  kanata"
+  assert_contains "$out" "pending  deployment update"
+
+  run_envmgr restore --yes
+  assert_eq "$rc" 75 "$out"
+  assert_contains "$out" "Reboot into the new deployment"
+  assert_contains "$(cat "$FAKE_STATE/log")" "rpm-ostree install --idempotent kanata"
+  assert_contains "$(cat "$FAKE_STATE/log")" "rpm-ostree upgrade"
+
+  # Until the reboot, restore stops before staging anything else.
+  : >"$FAKE_STATE/log"
+  run_envmgr restore --yes
+  assert_eq "$rc" 75 "$out"
+  assert_contains "$out" "already staged"
+  [[ "$(cat "$FAKE_STATE/log")" != *"install"* ]] || fail "staged again before reboot"
+
+  # Simulate the reboot.
+  rm -f "$FAKE_STATE/ostree-pending"
+  cat "$FAKE_STATE/rpm-staged" >>"$FAKE_STATE/rpm-installed"
+  run_envmgr restore --yes
+  assert_eq "$rc" 0 "$out"
+  run_envmgr check package
+  assert_eq "$rc" 0 "$out"
+}
+
+test_rpm_ostree_adopt() {
+  selected_linux fedora-cosmic-atomic
+  printf 'zsh\n' >"$FAKE_STATE/rpm-installed"
+  run_envmgr adopt package rpm-ostree zsh
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(cat "$pkgs/rpm-ostree/packages")" zsh
+  run_envmgr adopt package rpm-ostree missing
+  assert_eq "$rc" 1 "$out"
+}
+
 # --- runner ----------------------------------------------------------------
 
 tests=()

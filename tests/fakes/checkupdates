@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fake checkupdates: prints $FAKE_STATE/updates; exits 2 when empty.
+state="${FAKE_STATE:?}"
+[[ -s "$state/updates" ]] || exit 2
+cat "$state/updates"

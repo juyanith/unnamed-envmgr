@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fake rpm: `rpm -q name` checks $FAKE_STATE/rpm-installed.
+state="${FAKE_STATE:?}"
+[[ "$1" == -q ]] || exit 1
+grep -Fxq -- "$2" "$state/rpm-installed" 2>/dev/null
