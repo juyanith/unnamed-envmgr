@@ -61,6 +61,11 @@ envmgr_cmd_init() {
 
   envmgr_kv_set "$(envmgr_local_config_file)" machine "$machine"
   envmgr_write_chezmoi_config "$machine_dir"
+  # Clear Chezmoi's record of a previous source's config template (for
+  # example, the legacy .chezmoi.toml.tmpl), which otherwise warns on every
+  # command. Without a template, init leaves chezmoi.toml unchanged.
+  mkdir -p -- "$machine_dir/config"
+  envmgr_chezmoi "$machine_dir" init >/dev/null
   printf 'Selected machine %s. Run envmgr check, then envmgr restore.\n' "$machine"
 }
 
