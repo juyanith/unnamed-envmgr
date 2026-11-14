@@ -37,11 +37,14 @@ envmgr_load_providers
 source "$ENVMGR_ROOT/lib/envmgr/system.sh"
 # shellcheck source=lib/envmgr/commands.sh
 source "$ENVMGR_ROOT/lib/envmgr/commands.sh"
+# shellcheck source=lib/envmgr/setup.sh
+source "$ENVMGR_ROOT/lib/envmgr/setup.sh"
 
 envmgr_usage() {
   cat <<'EOF'
 usage: envmgr <command> [arguments]
 
+  setup
   init [--data <path>] <machine-id>
   init [--data <path>] --new <machine-id> [--from <machine-id>]
   check [config|system|package [provider]] [--offline]
@@ -54,8 +57,7 @@ usage: envmgr <command> [arguments]
   drop config [--delete] [--yes] [--dry-run] target...
   drop package [--delete] [--yes] [--dry-run] <provider> <package...>
 
-Not yet implemented: setup, evaluate, migrate, and the omarchy, flatpak, and
-rpm-ostree providers.
+Not yet implemented: evaluate and migrate.
 See DESIGN.md for the full command interface.
 EOF
 }
@@ -68,6 +70,7 @@ main() {
 
   [[ $# -gt 0 ]] && shift
   case "$command" in
+    setup) envmgr_cmd_setup "$@" ;;
     init) envmgr_cmd_init "$@" ;;
     check) envmgr_cmd_check "$@" ;;
     list) envmgr_cmd_list "$@" ;;
@@ -75,7 +78,7 @@ main() {
     adopt) envmgr_cmd_adopt "$@" ;;
     drop) envmgr_cmd_drop "$@" ;;
     -h|--help|help) envmgr_usage ;;
-    setup|evaluate|migrate)
+    evaluate|migrate)
       envmgr_die 1 "'$command' is not implemented yet"
       ;;
     "")

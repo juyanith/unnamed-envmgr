@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+# envmgr setup: interactive, idempotent first-run walkthrough. Must run under
+# /bin/bash 3.2 on a fresh Mac before Homebrew exists.
+
+ENVMGR_DEFAULT_DATA_URL="git@github.com:juyanith/envmgr-data.git"
+ENVMGR_DEFAULT_DATA_PATH="~/Work/Git/envmgr-data"
+ENVMGR_SSH_KEY_URL="https://github.com/settings/ssh/new"
+
+# Prompts read from file descriptor 3, opened on the terminal (or on
+# $ENVMGR_TTY, which tests use to script the answers).
+envmgr_setup_open_tty() {
+  local tty="${ENVMGR_TTY:-/dev/tty}"
+
+  { exec 3<"$tty"; } 2>/dev/null || \
+    envmgr_die 1 "envmgr setup is interactive and needs a terminal"
+}
+
+# Ask a question with an optional default; prints the answer.
+envmgr_ask() {
+  local prompt="$1"
+  local default="${2:-}"
+  local reply=""
+
+  if [[ -n "$default" ]]; then
+    printf '%s [%s]: ' "$prompt" "$default" >&2
+  else
+    printf '%s: ' "$prompt" >&2
+  fi
+  read -r reply <&3 || reply=""
+  printf '%s\n' "${reply:-$default}"
+}
+
+envmgr_ask_yes() {
+  local reply=""
+
+  reply="$(envmgr_ask "$1 [y/N]")"
+  [[ "$reply" == [Yy] || "$reply" == [Yy][Ee][Ss] ]]
+}
+
+envmgr_setup_step() {
+  printf '\n== %s\n' "$1"
+}
+
+envmgr_setup_open_url() {
+  if command -v open >/dev/null 2>&1; then
+    open "$1" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$1" >/dev/null 2>&1 || true
+  fi
+}
+
+# Make a Homebrew installed during this run usable for the rest of it.
+envmgr_setup_brew_path() {
+  envmgr_brew_find || return 1
+  case ":$PATH:" in
+    *":$(dirname -- "$ENVMGR_BREW"):"*) ;;
+    *) PATH="$(dirname -- "$ENVMGR_BREW"):$PATH" ;;
+  esac
+  export PATH
+}
+
+envmgr_setup_brew_install() {
+  local rc=0
+
+  if ! envmgr_setup_brew_path; then
+    printf 'Installing Homebrew.\n'
+    envmgr_pkg_homebrew_bootstrap || rc=$?
+    case "$rc" in
+      0) envmgr_setup_brew_path || return 1 ;;
+      "$ENVMGR_EXIT_REBOOT") exit "$ENVMGR_EXIT_REBOOT" ;;
+      *) return 1 ;;
+    esac
+  fi
+  envmgr_brew install "$@"
+}
+
+envmgr_setup_prerequisites() {
+  local missing=()
+  local tool=""
+  local link="$HOME/.local/bin/envmgr"
+  local target="$ENVMGR_ROOT/bin/envmgr"
+
+  envmgr_setup_step "Prerequisites"
+  if [[ "$ENVMGR_OS" == darwin ]] && ! xcode-select -p >/dev/null 2>&1; then
+    xcode-select --install >/dev/null 2>&1 || true
+    printf 'Finish installing the Command Line Tools, then rerun envmgr setup.\n'
+    exit "$ENVMGR_EXIT_REBOOT"
+  fi
+  for tool in git chezmoi; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if ((${#missing[@]} == 0)); then
+    printf 'Git and Chezmoi are installed.\n'
+  else
+    printf 'Installing %s.\n' "${missing[*]}"
+    case "$ENVMGR_DISTRIBUTION" in
+      omarchy) omarchy pkg add "${missing[@]}" ;;
+      macos|fedora-cosmic-atomic) envmgr_setup_brew_install "${missing[@]}" ;;
+      *) envmgr_die 1 "install ${missing[*]} manually, then rerun envmgr setup" ;;
+    esac || envmgr_die 1 "could not install ${missing[*]}"
+  fi
+
+  if [[ -L "$link" && "$(readlink -- "$link")" == "$target" ]]; then
+    printf 'Verified %s.\n' "$(envmgr_display_path "$link")"
+  else
+    if [[ -e "$link" || -L "$link" ]]; then
+      envmgr_backup_file "$link" setup
+      rm -f -- "$link"
+    fi
+    mkdir -p -- "$(dirname -- "$link")"
+    ln -s -- "$target" "$link"
+    printf 'Linked %s -> %s.\n' "$(envmgr_display_path "$link")" "$(envmgr_display_path "$target")"
+  fi
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) printf 'Add ~/.local/bin to PATH to run envmgr by name.\n' ;;
+  esac
+}
+
+envmgr_is_ssh_url() {
+  case "$1" in
+    ssh://*|*@*:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+envmgr_github_ssh_ok() {
+  local output=""
+
+  # GitHub exits 1 even when authentication succeeds.
+  output="$(ssh -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+    git@github.com 2>&1 </dev/null)" || true
+  [[ "$output" == *"successfully authenticated"* ]]
+}
+
+envmgr_setup_ssh() {
+  local url="$1"
+  local key="$HOME/.ssh/id_ed25519"
+
+  envmgr_setup_step "SSH"
+  if ! envmgr_is_ssh_url "$url"; then
+    printf 'The data repository URL does not use SSH; skipping.\n'
+    return 0
+  fi
+  case "$url" in
+    *github.com*) ;;
+    *)
+      printf 'Make sure this machine can reach %s over SSH.\n' "$url"
+      return 0
+      ;;
+  esac
+  if envmgr_github_ssh_ok; then
+    printf 'GitHub accepts this machine'\''s SSH key.\n'
+    return 0
+  fi
+  if [[ ! -f "$key.pub" ]]; then
+    printf 'Creating %s. Choose a passphrase when asked.\n' "$(envmgr_display_path "$key")"
+    mkdir -p -- "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    ssh-keygen -t ed25519 -C "$(id -un)@$(hostname -s 2>/dev/null || hostname)" -f "$key" <&3 || \
+      envmgr_die 1 "ssh-keygen failed"
+  fi
+  while ! envmgr_github_ssh_ok; do
+    printf '\nAdd this public key to GitHub at %s:\n\n' "$ENVMGR_SSH_KEY_URL"
+    cat -- "$key.pub"
+    printf '\n'
+    envmgr_setup_open_url "$ENVMGR_SSH_KEY_URL"
+    if ! envmgr_ask_yes "Press y after adding the key to check again (n stops setup)"; then
+      envmgr_die 1 "GitHub does not accept this machine's SSH key yet; rerun envmgr setup"
+    fi
+  done
+  printf 'GitHub accepts this machine'\''s SSH key.\n'
+}
+
+envmgr_setup_data() {
+  local config=""
+  local data=""
+  local url=""
+  local path=""
+
+  config="$(envmgr_local_config_file)"
+  envmgr_setup_step "Data repository"
+  if data="$(envmgr_local_get data)" && [[ -d "$data/machines" ]]; then
+    printf 'Using %s.\n' "$(envmgr_display_path "$data")"
+    return 0
+  fi
+
+  url="$(envmgr_kv_get "$config" data_url 2>/dev/null || true)"
+  url="$(envmgr_ask "Data repository URL" "${url:-$ENVMGR_DEFAULT_DATA_URL}")"
+  path="$(envmgr_ask "Checkout path" "$ENVMGR_DEFAULT_DATA_PATH")"
+  envmgr_setup_ssh "$url"
+  data="$(envmgr_expand_path "$path")"
+
+  if [[ -d "$data/.git" ]]; then
+    printf 'Using existing checkout %s.\n' "$(envmgr_display_path "$data")"
+  elif [[ -e "$data" ]]; then
+    envmgr_die 1 "$path exists and is not a Git checkout"
+  else
+    mkdir -p -- "$(dirname -- "$data")"
+    git clone -- "$url" "$data" || envmgr_die 1 "could not clone $url"
+  fi
+  [[ -d "$data/machines" ]] || envmgr_die 1 "data repository has no machines/ directory: $path"
+  envmgr_kv_set "$config" data "$path"
+  envmgr_kv_set "$config" data_url "$url"
+}
+
+# Print the machines whose os and distribution match this system.
+envmgr_matching_machines() {
+  local data="$1"
+  local dir=""
+
+  for dir in "$data"/machines/*/; do
+    [[ -f "$dir/machine.conf" ]] || continue
+    [[ "$(envmgr_kv_get "$dir/machine.conf" os 2>/dev/null)" == "$ENVMGR_OS" ]] || continue
+    [[ "$(envmgr_kv_get "$dir/machine.conf" distribution 2>/dev/null)" == "$ENVMGR_DISTRIBUTION" ]] || continue
+    basename -- "$dir"
+  done
+}
+
+envmgr_setup_machine() {
+  local data=""
+  local machine=""
+  local choice=""
+  local from=""
+  local machines=()
+  local i=0
+
+  envmgr_setup_step "Machine"
+  data="$(envmgr_data_dir)"
+  if machine="$(envmgr_kv_get "$(envmgr_local_config_file)" machine 2>/dev/null)" && \
+    [[ -d "$data/machines/$machine" ]]; then
+    printf 'This machine is %s.\n' "$machine"
+    return 0
+  fi
+
+  while IFS= read -r machine; do
+    machines+=("$machine")
+  done < <(envmgr_matching_machines "$data")
+  printf 'Machines for %s:\n' "$ENVMGR_DISTRIBUTION"
+  for ((i = 0; i < ${#machines[@]}; i++)); do
+    printf '  %d) %s  %s\n' "$((i + 1))" "${machines[$i]}" \
+      "$(envmgr_kv_get "$data/machines/${machines[$i]}/machine.conf" description 2>/dev/null || true)"
+  done
+  printf '  n) new machine\n  s) skip for now\n'
+
+  while true; do
+    choice="$(envmgr_ask "Choose")"
+    case "$choice" in
+      s|S)
+        printf 'Skipped. Run envmgr init <machine-id> later.\n'
+        return 0
+        ;;
+      n|N)
+        machine="$(envmgr_ask "New machine ID")"
+        if ((${#machines[@]})); then
+          from="$(envmgr_ask "Copy from (blank for an empty machine)")"
+        fi
+        if [[ -n "$from" ]]; then
+          envmgr_cmd_init --new --from "$from" "$machine"
+        else
+          envmgr_cmd_init --new "$machine"
+        fi
+        return 0
+        ;;
+      *[!0-9]*|"") ;;
+      *)
+        if ((choice >= 1 && choice <= ${#machines[@]})); then
+          envmgr_cmd_init "${machines[$((choice - 1))]}"
+          return 0
+        fi
+        ;;
+    esac
+    printf 'Enter a number, n, or s.\n'
+  done
+}
+
+envmgr_setup_agent() {
+  local config=""
+  local agent=""
+
+  config="$(envmgr_local_config_file)"
+  envmgr_setup_step "Agent"
+  if agent="$(envmgr_kv_get "$config" agent 2>/dev/null)"; then
+    printf 'Agent for envmgr evaluate: %s\n' "${agent:-none}"
+    return 0
+  fi
+  agent="$(envmgr_ask "Agent command for envmgr evaluate (for example codex or claude; blank for none)")"
+  envmgr_kv_set "$config" agent "$agent"
+}
+
+envmgr_cmd_setup() {
+  [[ $# -eq 0 ]] || envmgr_usage_error "setup takes no arguments"
+  envmgr_detect_platform
+  envmgr_setup_open_tty
+  envmgr_setup_prerequisites
+  envmgr_setup_data
+  envmgr_setup_machine
+  envmgr_setup_agent
+  exec 3<&-
+  printf '\nSetup is complete. Next: envmgr check, then envmgr restore.\n'
+}

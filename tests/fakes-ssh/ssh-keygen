@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fake ssh-keygen: writes a placeholder key pair at the -f path.
+while [[ $# -gt 0 ]]; do
+  [[ "$1" == -f ]] && file="$2"
+  shift
+done
+printf 'fake private key\n' >"${file:?}"
+printf 'ssh-ed25519 AAAAfake test\n' >"$file.pub"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Fake ssh for setup tests: GitHub accepts the key when $FAKE_STATE/ssh-ok exists.
+printf 'ssh %s\n' "$*" >>"${FAKE_STATE:?}/log"
+if [[ -e "$FAKE_STATE/ssh-ok" ]]; then
+  echo "Hi user! You've successfully authenticated, but GitHub does not provide shell access." >&2
+else
+  echo "git@github.com: Permission denied (publickey)." >&2
+  exit 255
+fi
+exit 1

@@ -856,6 +856,109 @@ test_rpm_ostree_adopt() {
   assert_eq "$rc" 1 "$out"
 }
 
+# Create a data origin with one machine for this platform; sets data_origin.
+make_data_origin() {
+  local seed="$work/data-seed"
+
+  data_origin="$work/origins/data.git"
+  git init -q --bare -b main "$data_origin"
+  git init -q -b main "$seed"
+  mkdir -p "$seed/machines/mac/config" "$seed/machines/other/config"
+  printf 'os=darwin\ndistribution=macos\ndescription=Desk Mac\n' >"$seed/machines/mac/machine.conf"
+  printf 'os=linux\ndistribution=omarchy\n' >"$seed/machines/other/machine.conf"
+  printf 'x\n' >"$seed/machines/mac/config/dot_x"
+  git -C "$seed" add -A
+  git -C "$seed" -c user.name=t -c user.email=t@t commit -qm data
+  git -C "$seed" remote add origin "$data_origin"
+  git -C "$seed" push -q origin main
+}
+
+# Run setup with scripted answers, one per line.
+run_setup() {
+  printf '%s\n' "$@" >"$work/answers"
+  ENVMGR_TTY="$work/answers" run_envmgr setup
+}
+
+test_setup_clones_and_selects_machine() {
+  make_data_origin
+  run_setup "$data_origin" "~/Work/data" 1 codex
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "1) mac  Desk Mac"
+  [[ "$out" != *"other"* ]] || fail "offered a machine for another platform"
+  assert_contains "$out" "Selected machine mac"
+  assert_contains "$out" "does not use SSH"
+  [[ -d "$HOME/Work/data/machines/mac" ]] || fail "data not cloned"
+  [[ "$(readlink "$HOME/.local/bin/envmgr")" == "$root/bin/envmgr" ]] || fail "envmgr not linked"
+  local config="$HOME/.config/envmgr/config"
+  assert_contains "$(cat "$config")" "data=~/Work/data"
+  assert_contains "$(cat "$config")" "data_url=$data_origin"
+  assert_contains "$(cat "$config")" "machine=mac"
+  assert_contains "$(cat "$config")" "agent=codex"
+
+  # A second run asks nothing and changes nothing.
+  cp "$config" "$work/config.before"
+  run_setup
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "This machine is mac."
+  assert_contains "$out" "Agent for envmgr evaluate: codex"
+  assert_eq "$(cat "$config")" "$(cat "$work/config.before")"
+}
+
+test_setup_new_machine_and_skip() {
+  make_data_origin
+  run_setup "$data_origin" "" bogus n laptop mac ""
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Enter a number, n, or s."
+  assert_contains "$out" "Created machine laptop from mac."
+  [[ -f "$HOME/Work/Git/envmgr-data/machines/laptop/config/dot_x" ]] || fail "machine not copied"
+  assert_contains "$(cat "$HOME/.config/envmgr/config")" "machine=laptop"
+  assert_contains "$(cat "$HOME/.config/envmgr/config")" "agent="
+
+  rm -rf "$HOME/.config/envmgr" "$HOME/Work"
+  run_setup "$data_origin" "" s ""
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Skipped."
+  [[ "$(cat "$HOME/.config/envmgr/config")" != *"machine="* ]] || fail "skip selected a machine"
+}
+
+test_setup_backs_up_existing_link() {
+  make_data_origin
+  mkdir -p "$HOME/.local/bin"
+  printf 'old\n' >"$HOME/.local/bin/envmgr"
+  run_setup "$data_origin" "" s ""
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Backed up"
+  [[ -L "$HOME/.local/bin/envmgr" ]] || fail "envmgr not linked"
+}
+
+test_setup_guides_github_ssh() {
+  make_data_origin
+  export FAKE_STATE="$work/fake"
+  mkdir -p "$FAKE_STATE"
+  export PATH="$root/tests/fakes-ssh:$PATH"
+  git clone -q "$data_origin" "$HOME/Work/Git/envmgr-data"
+
+  run_setup "git@github.com:someone/data.git" "" n
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "ssh-ed25519 AAAAfake test"
+  assert_contains "$out" "https://github.com/settings/ssh/new"
+  assert_contains "$out" "rerun envmgr setup"
+  [[ -f "$HOME/.ssh/id_ed25519" ]] || fail "no key created"
+
+  touch "$FAKE_STATE/ssh-ok"
+  run_setup "git@github.com:someone/data.git" "" s ""
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "GitHub accepts this machine's SSH key."
+  assert_contains "$out" "Using existing checkout"
+  assert_contains "$(cat "$HOME/.config/envmgr/config")" "data_url=git@github.com:someone/data.git"
+}
+
+test_setup_requires_terminal() {
+  ENVMGR_TTY="$work/missing" run_envmgr setup
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "needs a terminal"
+}
+
 # --- runner ----------------------------------------------------------------
 
 tests=()
