@@ -99,7 +99,7 @@ envmgr restore [config|package|system] [...]
 envmgr adopt   config|package ...
 envmgr drop    config|package ...
 envmgr evaluate [config|package|system]
-envmgr migrate <url> | migrate --follow <url>
+envmgr migrate [--no-history] <url> | migrate --follow <url>
 ```
 
 - Every command acts on the active machine from `~/.config/envmgr/config`.
@@ -188,9 +188,25 @@ complete:
 4. Update any git-provider entries that reference the old URL in every
    machine's manifests, and leave those edits uncommitted for review.
 5. Print the follow-up step for other machines: `envmgr migrate --follow
-   <url>` only changes `origin` and `data_url=` after verifying that a
-   branch of the new remote contains the current `HEAD`. It fetches into a
-   temporary ref namespace and removes it afterward.
+   <url>`. It fetches the new remote into a temporary ref namespace (removed
+   afterward), then:
+   - when a branch there contains the current `HEAD`, changes only `origin`
+     and `data_url=`;
+   - when the new remote shares no history with the checkout (a copy made
+     with `--no-history`), checks that the checkout is clean and fully
+     pushed to the old `origin`, then, after confirmation, replaces the
+     checkout as described below;
+   - otherwise (shared history, but `HEAD` is missing) refuses, because the
+     checkout has commits that were never migrated.
+
+`migrate --no-history <url>` makes a clean copy instead: one new root commit
+with the current files of `origin`'s default branch, pushed as that branch.
+History, other branches, and tags stay only in the old repository; the
+preview lists what is left out. Because the checkout no longer shares
+history with its remote, envmgr then renames it to
+`<data>.old-<timestamp>` and clones the new URL into the same path, so
+`data=` and Chezmoi's `sourceDir` stay valid and the machine stays selected.
+Envmgr never deletes the renamed checkout.
 
 When `origin` already is `<url>`, `migrate` only records `data_url=`.
 
@@ -420,3 +436,4 @@ with the agent's exit code. The prompt contains:
 | 15 | Agent invoked as a command with the prompt appended as the last argument | 2026-11-14 |
 | 16 | `migrate` pushes `origin`'s branches and tags instead of `--mirror` | 2026-11-14 |
 | 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand; setup never generates one | 2026-11-14 |
+| 18 | `migrate --no-history` pushes one root commit; checkouts that cannot follow are renamed and re-cloned, never deleted | 2026-11-14 |

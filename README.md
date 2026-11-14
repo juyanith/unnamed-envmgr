@@ -60,6 +60,7 @@ afterward.
 envmgr adopt config --encrypt ~/.netrc   # secrets: stored only as age ciphertext
 envmgr evaluate [config|package|system]  # start the agent with the current check
 envmgr migrate <url>                     # move envmgr-data to a new, empty remote
+envmgr migrate --no-history <url>        # or move a clean copy of its current files
 envmgr migrate --follow <url>            # then, on every other machine
 ```
 

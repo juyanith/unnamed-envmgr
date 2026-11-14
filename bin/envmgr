@@ -61,8 +61,8 @@ usage: envmgr <command> [arguments]
   drop config [--delete] [--yes] [--dry-run] target...
   drop package [--delete] [--yes] [--dry-run] <provider> <package...>
   evaluate [config|system|package] [--offline]
-  migrate <url> [--yes] [--dry-run]
-  migrate --follow <url> [--dry-run]
+  migrate <url> [--no-history] [--yes] [--dry-run]
+  migrate --follow <url> [--yes] [--dry-run]
 
 See DESIGN.md for the full command interface.
 EOF

@@ -1184,6 +1184,73 @@ test_migrate_follow() {
   assert_eq "$(git -C "$data" for-each-ref refs/envmgr-follow)" "" "temporary refs left"
 }
 
+test_migrate_no_history() {
+  data_checkout
+  run_envmgr restore config --yes
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  git -C "$data" branch feature
+  git -C "$data" push -q -u origin feature
+  git -C "$data" tag v1
+  git -C "$data" push -q origin v1
+  local new="$work/origins/new.git"
+  local tree=""
+  git init -q --bare -b main "$new"
+  tree="$(git -C "$data" rev-parse 'origin/main^{tree}')"
+
+  run_envmgr migrate --no-history "$new" --dry-run
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "omitted   history, 1 tag(s), other branches: feature"
+  assert_eq "$(git ls-remote "$new")" "" "dry run pushed"
+
+  run_envmgr migrate --no-history "$new" --yes
+  assert_eq "$rc" 0 "$out"
+  local refs=""
+  refs="$(git ls-remote "$new")"
+  assert_contains "$refs" "refs/heads/main"
+  [[ "$refs" != *feature* && "$refs" != *refs/tags* ]] || fail "copied more than main: $refs"
+  assert_eq "$(git --git-dir="$new" rev-list --count main)" 1
+  assert_eq "$(git --git-dir="$new" rev-parse 'main^{tree}')" "$tree"
+  assert_eq "$(git -C "$data" remote get-url origin)" "$new"
+  [[ -d "$(echo "$data".old-*)/.git" ]] || fail "old checkout not kept"
+  assert_contains "$(cat "$HOME/.config/envmgr/config")" "data_url=$new"
+  assert_eq "$(cat "$data/machines/mac/packages/git/repos")" "$new $data main"
+  run_envmgr check config
+  assert_eq "$rc" 0 "$out"
+}
+
+test_migrate_follow_clean_copy() {
+  data_checkout
+  run_envmgr restore config --yes
+  local new="$work/origins/new.git"
+  local copy=""
+  git init -q --bare -b main "$new"
+  copy="$(git -C "$data" -c user.name=t -c user.email=t@t commit-tree -m copy 'origin/main^{tree}')"
+  git -C "$data" push -q "$new" "$copy:refs/heads/main"
+
+  printf 'dirty\n' >"$data/dirty"
+  run_envmgr migrate --follow "$new" --yes
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "uncommitted changes"
+  rm "$data/dirty"
+
+  run_envmgr migrate --follow "$new" --dry-run
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "is a copy without this checkout's history"
+  assert_eq "$(git -C "$data" remote get-url origin)" "$data_origin"
+
+  run_envmgr migrate --follow "$new" --yes
+  assert_eq "$rc" 0 "$out"
+  assert_eq "$(git -C "$data" remote get-url origin)" "$new"
+  assert_eq "$(git -C "$data" rev-parse HEAD)" "$copy"
+  [[ -d "$(echo "$data".old-*)/.git" ]] || fail "old checkout not kept"
+  assert_contains "$(cat "$HOME/.config/envmgr/config")" "machine=mac"
+  run_envmgr check config
+  assert_eq "$rc" 0 "$out"
+
+  run_envmgr migrate --follow --no-history "$new"
+  assert_eq "$rc" 2 "$out"
+}
+
 test_setup_reports_missing_age_key() {
   make_data_origin
   git clone -q "$data_origin" "$work/seed2"
