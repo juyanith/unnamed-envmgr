@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fake open and xdg-open for every test: record the URL, never start a
+# browser or another application.
+printf '%s\n' "$*" >>"${work:?}/opened"

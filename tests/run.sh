@@ -1016,6 +1016,7 @@ test_setup_guides_github_ssh() {
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "ssh-ed25519 AAAAfake test"
   assert_contains "$out" "https://github.com/settings/ssh/new"
+  assert_eq "$(cat "$work/opened")" "https://github.com/settings/ssh/new"
   assert_contains "$out" "rerun envmgr setup"
   [[ -f "$HOME/.ssh/id_ed25519" ]] || fail "no key created"
 
@@ -1114,15 +1115,16 @@ test_setup_suggests_new_machine_defaults() {
   assert_contains "$out" "- Sign in to the App Store."
 }
 
-test_setup_declares_chezmoi() {
+test_setup_declares_tools() {
   make_data_origin
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
   local brewfile="$HOME/Work/Git/envmgr-data/machines/mac/packages/homebrew/Brewfile"
 
-  # Chezmoi installed some other way is left undeclared.
+  # Tools installed some other way are left undeclared.
   run_setup "$data_origin" "" 1 "" n
   assert_eq "$rc" 0 "$out"
-  assert_contains "$out" "chezmoi was not installed with homebrew"
+  assert_contains "$out" "git is not installed with homebrew; leaving it undeclared."
+  assert_contains "$out" "chezmoi is not installed with homebrew; leaving it undeclared."
   [[ ! -e "$(dirname "$brewfile")" ]] || fail "left an empty homebrew directory"
   [[ "$out" != *"== Save"* ]] || fail "offered to save an unchanged machine"
 
@@ -1133,10 +1135,16 @@ test_setup_declares_chezmoi() {
   assert_eq "$(cat "$brewfile")" 'brew "chezmoi"'
   assert_contains "$out" "save: pushed to origin/main"
 
-  # Once declared, setup leaves it alone.
+  printf 'git\n' >>"$FAKE_BREW_STATE/formulae"
+  run_setup y n
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "package/homebrew: adopted brew git"
+  [[ "$out" != *"adopted brew chezmoi"* ]] || fail "declared chezmoi again"
+
+  # Once both are declared, setup leaves them alone.
   run_setup n
   assert_eq "$rc" 0 "$out"
-  [[ "$out" != *"== Chezmoi"* ]] || fail "declared chezmoi again"
+  [[ "$out" != *"== Tools"* ]] || fail "declared the tools again"
 }
 
 test_init_new_declares_checkouts() {
@@ -1745,7 +1753,8 @@ for test_bash in "${shells[@]}"; do
       export HOME="$work/home"
       unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME
       export ENVMGR_OS=darwin ENVMGR_DISTRIBUTION=macos ENVMGR_ARCHITECTURE=apple-silicon
-      # Never find the real Homebrew.
+      # Never open a browser or find the real Homebrew.
+      export PATH="$root/tests/fakes-system:$PATH"
       export ENVMGR_BREW="$root/tests/fakes/brew" FAKE_BREW_STATE="$work/brew"
       mkdir -p "$FAKE_BREW_STATE"
       data="$work/data"

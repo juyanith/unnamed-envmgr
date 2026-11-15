@@ -54,8 +54,9 @@ steps. It:
    machine's files, and saves it as `~/.config/envmgr/age.key`. Or press
    Enter and copy the file over from another machine before restoring.
 6. Optionally records an agent command for `envmgr evaluate`.
-7. Declares `chezmoi` in the machine's Homebrew or Omarchy packages if it
-   isn't already, so `envmgr restore` keeps it upgraded.
+7. Declares Git and Chezmoi in the machine's Homebrew or Omarchy packages
+   if they were installed that way and aren't declared yet, so
+   `envmgr restore` keeps them upgraded.
 8. Offers to commit and push a new or changed machine with `envmgr save`.
 9. Offers to run `envmgr restore`, which previews and confirms packages, then
    config, then system units.
