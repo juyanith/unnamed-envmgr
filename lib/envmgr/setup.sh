@@ -505,6 +505,57 @@ envmgr_setup_age_key() {
 
 # Commit and push a machine that setup created or changed, so it is on origin
 # even if restore later stops for a reboot.
+# Exit 0 when any of the machine's providers declares the package.
+envmgr_setup_declares() {
+  local machine_dir="$1"
+  local name="$2"
+  local provider=""
+  local names=""
+
+  for provider in $(envmgr_active_providers "$machine_dir"); do
+    envmgr_pkg_enter "$machine_dir" "$provider"
+    names="$(envmgr_pkg_call "$provider" list | awk '{ print $1 }')" || return 1
+    printf '%s\n' "$names" | grep -Fxq -- "$name" && return 0
+  done
+  return 1
+}
+
+# Declare Git and Chezmoi, which envmgr needs, with the provider setup
+# installs them through, so restore keeps them installed and upgraded.
+envmgr_setup_tools() {
+  local machine=""
+  local machine_dir=""
+  local provider=""
+  local tool=""
+  local started=false
+  local created=false
+
+  machine="$(envmgr_kv_get "$(envmgr_local_config_file)" machine 2>/dev/null)" || return 0
+  machine_dir="$(envmgr_machine_dir "$(envmgr_data_dir)" "$machine")"
+  case "$ENVMGR_DISTRIBUTION" in
+    macos|fedora-cosmic-atomic) provider=homebrew ;;
+    omarchy) provider=omarchy ;;
+    *) return 0 ;;
+  esac
+  envmgr_pkg_call "$provider" available || return 0
+  [[ -d "$machine_dir/packages/$provider" ]] || created=true
+  for tool in git chezmoi; do
+    envmgr_setup_declares "$machine_dir" "$tool" && continue
+    if [[ "$started" == false ]]; then
+      envmgr_setup_step "Tools"
+      started=true
+    fi
+    # A tool the system provides (for example, Git from the Command Line
+    # Tools or the Fedora image) is updated with the system, not declared.
+    (envmgr_adopt_package "$machine_dir" "$provider" "$tool" 2>/dev/null) || \
+      printf '%s is not installed with %s; leaving it undeclared.\n' "$tool" "$provider"
+  done
+  # Adopting creates the provider directory; remove it if nothing was added.
+  if [[ "$created" == true ]]; then
+    rmdir -- "$machine_dir/packages/$provider" 2>/dev/null || true
+  fi
+}
+
 envmgr_setup_save() {
   local machine=""
   local data=""
@@ -577,6 +628,7 @@ envmgr_cmd_setup() {
   envmgr_setup_machine
   envmgr_setup_age_key
   envmgr_setup_agent
+  envmgr_setup_tools
   envmgr_setup_save
   envmgr_setup_restore
   envmgr_setup_postinstall

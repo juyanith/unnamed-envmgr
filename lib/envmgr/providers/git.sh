@@ -137,7 +137,7 @@ envmgr_pkg_git_adopt() {
   local branch=""
 
   for target in "$@"; do
-    target="$(envmgr_absolute_target "$target")"
+    target="$(envmgr_absolute_target "$target")" || return 1
     [[ -d "$target/.git" ]] || envmgr_die 1 "not a Git checkout: $target"
     url="$(git -C "$target" remote get-url origin)" || envmgr_die 1 "$target has no origin remote"
     branch="$(git -C "$target" branch --show-current)"

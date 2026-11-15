@@ -54,10 +54,13 @@ steps. It:
    machine's files, and saves it as `~/.config/envmgr/age.key`. Or press
    Enter and copy the file over from another machine before restoring.
 6. Optionally records an agent command for `envmgr evaluate`.
-7. Offers to commit and push a new or changed machine with `envmgr save`.
-8. Offers to run `envmgr restore`, which previews and confirms packages, then
+7. Declares Git and Chezmoi in the machine's Homebrew or Omarchy packages
+   if they were installed that way and aren't declared yet, so
+   `envmgr restore` keeps them upgraded.
+8. Offers to commit and push a new or changed machine with `envmgr save`.
+9. Offers to run `envmgr restore`, which previews and confirms packages, then
    config, then system units.
-9. Prints the machine's `POSTINSTALL.md`, if it has one: manual steps such as
+10. Prints the machine's `POSTINSTALL.md`, if it has one: manual steps such as
    signing in to the App Store or granting privacy permissions.
 
 When restore needs a reboot or re-login (exit `75`), or stops on an error,

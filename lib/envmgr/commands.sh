@@ -106,6 +106,13 @@ envmgr_create_machine() {
     printf 'Created empty machine %s.\n' "$machine"
   fi
   mkdir -p -- "$machine_dir/config" "$machine_dir/packages" "$machine_dir/system"
+  # Every machine keeps the tool and its data current.
+  if [[ -z "$from" ]]; then
+    for item in "$ENVMGR_ROOT" "$data"; do
+      (envmgr_adopt_package "$machine_dir" git "$item") || \
+        envmgr_warn "declare $item with envmgr adopt package git"
+    done
+  fi
 }
 
 envmgr_cmd_check() {

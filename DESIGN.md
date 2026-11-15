@@ -202,19 +202,25 @@ complete:
    answer explains how to copy the file instead. Setup never generates a
    key, because a new key cannot decrypt existing files.
 6. **Agent.** Optionally record the agent command for `evaluate`.
-7. **Save.** When the selected machine's directory has uncommitted changes
-   (for example, a machine created in step 4), offer to run `envmgr save`,
+7. **Tools.** For each of `git` and `chezmoi` that none of the machine's
+   providers declares, adopt it with the provider step 1 installs through
+   (`homebrew` on macOS and Fedora COSMIC Atomic, `omarchy` on Omarchy), so
+   restore keeps it installed and upgraded. A tool the system provides (Git
+   from the Command Line Tools or the Fedora image) is left undeclared and
+   updated with the system.
+8. **Save.** When the selected machine's directory has uncommitted changes
+   (for example, a machine created in step 4, or a tool declared in step
+   7), offer to run `envmgr save`,
    so the machine is on `origin` before anything long-running. A failed
    save warns and setup continues.
-8. **Restore.** Offer to run `envmgr restore`, which previews and confirms
+9. **Restore.** Offer to run `envmgr restore`, which previews and confirms
    each phase as usual; inside setup, its confirmations read the same input
    as setup's questions. When restore exits `75`, setup asks for a reboot or
    re-login and exits `75`; on any other failure it exits `1`. Either way,
    running `envmgr setup` again skips the finished steps and reaches restore
    again. When the `git` provider pulls new code, restore re-executes
    `envmgr setup`, which continues to restore without asking again.
-
-9. **Manual steps.** Print the machine's `POSTINSTALL.md`, if present: the
+10. **Manual steps.** Print the machine's `POSTINSTALL.md`, if present: the
    steps envmgr cannot automate, such as App Store sign-in or privacy grants.
 
 Yes/no questions whose usual answer is yes (save, restore) default to yes.
@@ -231,7 +237,9 @@ Yes/no questions whose usual answer is yes (save, restore) default to yes.
   metadata and an empty `config/`, `packages/`, `system/`, and `SPEC.md`.
   With `--from`, it copies those, and `POSTINSTALL.md`, from another
   machine with the same `os` and `distribution`. Copies are owned
-  independently from then on.
+  independently from then on. Without `--from`, the `git` provider declares
+  the envmgr checkout and the data checkout, as every machine does; a
+  checkout that cannot be adopted (outside `$HOME`, no `origin`) warns.
   The new machine is then selected as with `init <id>`.
 
 #### `envmgr migrate`
@@ -599,3 +607,4 @@ the right directory afterward.
 | 21 | `adopt config --from` copies sources only for targets that do not exist on this machine; anything else is sent to `evaluate --from` | 2026-11-14 |
 | 22 | A new machine starts from one OS-neutral command, `install.sh` piped from GitHub, which only makes Git usable, clones the tool, and starts `setup`; a machine is based on an existing machine with the same `os` and `distribution`, or starts empty | 2026-11-14 |
 | 23 | `setup` carries on through `save` and `restore`, so the one command leaves the machine configured; after a reboot or error, rerunning `setup` resumes | 2026-11-14 |
+| 24 | envmgr's own dependencies are declared like any other package: `setup` adopts `git` and `chezmoi` with the provider that installed them, unless the system provides them, and an empty machine starts with the tool and data checkouts in `git/repos` | 2026-11-15 |
