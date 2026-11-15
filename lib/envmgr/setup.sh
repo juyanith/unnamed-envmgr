@@ -505,6 +505,43 @@ envmgr_setup_age_key() {
 
 # Commit and push a machine that setup created or changed, so it is on origin
 # even if restore later stops for a reboot.
+# Exit 0 when any of the machine's providers declares Chezmoi.
+envmgr_setup_declares_chezmoi() {
+  local machine_dir="$1"
+  local provider=""
+  local names=""
+
+  for provider in $(envmgr_active_providers "$machine_dir"); do
+    envmgr_pkg_enter "$machine_dir" "$provider"
+    names="$(envmgr_pkg_call "$provider" list | awk '{ print $1 }')" || return 1
+    printf '%s\n' "$names" | grep -Fxq chezmoi && return 0
+  done
+  return 1
+}
+
+# Declare Chezmoi with the provider setup installs it through, so restore
+# keeps it installed and upgraded on every machine.
+envmgr_setup_chezmoi() {
+  local machine=""
+  local machine_dir=""
+  local provider=""
+
+  machine="$(envmgr_kv_get "$(envmgr_local_config_file)" machine 2>/dev/null)" || return 0
+  machine_dir="$(envmgr_machine_dir "$(envmgr_data_dir)" "$machine")"
+  case "$ENVMGR_DISTRIBUTION" in
+    macos|fedora-cosmic-atomic) provider=homebrew ;;
+    omarchy) provider=omarchy ;;
+    *) return 0 ;;
+  esac
+  envmgr_setup_declares_chezmoi "$machine_dir" && return 0
+  envmgr_pkg_call "$provider" available || return 0
+  envmgr_setup_step "Chezmoi"
+  # Chezmoi installed some other way is left undeclared.
+  (envmgr_adopt_package "$machine_dir" "$provider" chezmoi) && return 0
+  rmdir -- "$machine_dir/packages/$provider" 2>/dev/null || true
+  envmgr_warn "chezmoi was not installed with $provider; declare it in this machine's packages by hand"
+}
+
 envmgr_setup_save() {
   local machine=""
   local data=""
@@ -577,6 +614,7 @@ envmgr_cmd_setup() {
   envmgr_setup_machine
   envmgr_setup_age_key
   envmgr_setup_agent
+  envmgr_setup_chezmoi
   envmgr_setup_save
   envmgr_setup_restore
   envmgr_setup_postinstall

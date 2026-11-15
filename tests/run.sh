@@ -1114,6 +1114,58 @@ test_setup_suggests_new_machine_defaults() {
   assert_contains "$out" "- Sign in to the App Store."
 }
 
+test_setup_declares_chezmoi() {
+  make_data_origin
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  local brewfile="$HOME/Work/Git/envmgr-data/machines/mac/packages/homebrew/Brewfile"
+
+  # Chezmoi installed some other way is left undeclared.
+  run_setup "$data_origin" "" 1 "" n
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "chezmoi was not installed with homebrew"
+  [[ ! -e "$(dirname "$brewfile")" ]] || fail "left an empty homebrew directory"
+  [[ "$out" != *"== Save"* ]] || fail "offered to save an unchanged machine"
+
+  printf 'chezmoi\n' >"$FAKE_BREW_STATE/formulae"
+  run_setup y n
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "package/homebrew: adopted brew chezmoi"
+  assert_eq "$(cat "$brewfile")" 'brew "chezmoi"'
+  assert_contains "$out" "save: pushed to origin/main"
+
+  # Once declared, setup leaves it alone.
+  run_setup n
+  assert_eq "$rc" 0 "$out"
+  [[ "$out" != *"== Chezmoi"* ]] || fail "declared chezmoi again"
+}
+
+test_init_new_declares_checkouts() {
+  local tool="$HOME/tool"
+  local data="$HOME/data"
+  local repos="$data/machines/fresh/packages/git/repos"
+
+  # envmgr resolves its own path physically; on macOS the temporary
+  # directory is under the /var symlink.
+  HOME="$(cd -P "$HOME" && pwd)"
+  tool="$HOME/tool"
+  data="$HOME/data"
+  repos="$data/machines/fresh/packages/git/repos"
+  mkdir -p "$tool"
+  cp -R "$root/bin" "$root/lib" "$tool/"
+  git init -q -b main "$tool"
+  git -C "$tool" remote add origin https://example.com/envmgr.git
+  mkdir -p "$data/machines"
+  git init -q -b main "$data"
+  git -C "$data" remote add origin https://example.com/data.git
+  set +e
+  out="$("$test_bash" "$tool/bin/envmgr" init --data "$data" --new fresh 2>&1)"
+  rc=$?
+  set -e
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$repos")" "https://example.com/envmgr.git ~/tool main"
+  assert_contains "$(cat "$repos")" "https://example.com/data.git ~/data main"
+}
+
 test_setup_requires_terminal() {
   ENVMGR_TTY="$work/missing" run_envmgr setup
   assert_eq "$rc" 1 "$out"
@@ -1693,6 +1745,9 @@ for test_bash in "${shells[@]}"; do
       export HOME="$work/home"
       unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME
       export ENVMGR_OS=darwin ENVMGR_DISTRIBUTION=macos ENVMGR_ARCHITECTURE=apple-silicon
+      # Never find the real Homebrew.
+      export ENVMGR_BREW="$root/tests/fakes/brew" FAKE_BREW_STATE="$work/brew"
+      mkdir -p "$FAKE_BREW_STATE"
       data="$work/data"
       export work
       mkdir -p "$HOME" "$data/machines"
