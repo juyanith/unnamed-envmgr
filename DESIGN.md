@@ -89,7 +89,7 @@ description=Mac mini, primary desk machine
 - `os` and `distribution` are required. Commands that change the system or
   copy from it (`restore`, `adopt`, `drop`, `save`), and `init`, refuse to
   run when they do not match the running system. `check`, `list`,
-  `evaluate`, and `publish` warn and continue.
+  `evaluate`, `diff`, and `publish` warn and continue.
 - A mismatch in the optional `architecture` field produces a warning.
 - Hardware is not a dimension. Hardware-specific settings live in the files
   of the machines that need them.
@@ -108,7 +108,8 @@ envmgr drop    config|package ...
 envmgr evaluate [config|package|system] [--offline]
 envmgr evaluate --from <id> [target...] [--offline]
 envmgr migrate [--no-history] <url> | migrate --follow <url>
-envmgr save    [target...]
+envmgr diff    [target...]
+envmgr save    [--force] [target...]
 envmgr publish [-m <message>] [--no-push]
 ```
 
@@ -340,7 +341,21 @@ Commands:
 - **`check config`** reads `chezmoi status`. Column one (last written state
   versus actual) is reported as **local changes**; column two (actual versus
   source) as **pending restore**. Both count as drift. When there are local
-  changes, it adds a line pointing to `save` and `restore config`.
+  changes, it adds a line pointing to `diff`, `save`, and `restore config`.
+- **`diff [target...]`** is read-only and shows each changed target:
+  - a local change, as the diff from source to file (what `save` records);
+  - a pending restore, as the diff from file to source (what `restore config`
+    writes);
+  - a target changed on both sides, as two diffs from the version Chezmoi
+    last wrote: **changed here** and **changed in the source**, followed by
+    the commands that keep either side. Chezmoi stores only that version's
+    hash, so envmgr looks for it in the latest 100 data repository commits
+    that changed the source file. When it is not there (a template, an
+    encrypted or uncommitted source), `diff` says so and compares the source
+    with the file.
+
+  Encrypted targets are listed without their contents. Targets limit the
+  output to those at or under them; each must be managed.
 - **`list config`** prints targets and their kind: file, directory, symlink,
   `modify`, or encrypted.
 - **`restore config [target...]`** previews the diff, then confirms and
@@ -368,7 +383,11 @@ Commands:
   with a warning and reason, any target that:
   - changed in the source too since Chezmoi last wrote it (the source's
     content no longer matches the hash in Chezmoi's persistent state, for
-    example after a pull), because saving would discard that change;
+    example after a pull), because saving would discard that change. The
+    warning points to `diff`, `save --force`, and `restore config`.
+    `--force` saves such targets anyway; it requires targets, so it never
+    discards a source change that was not named. To combine both sides, edit
+    the file in `$HOME`, then save it with `--force`;
   - is a template or `modify_` source, which must be edited in the source;
   - was deleted, or changed type (file to symlink or back).
 
@@ -635,3 +654,4 @@ the right directory afterward.
 | 23 | `setup` carries on through `publish` and `restore`, so the one command leaves the machine configured; after a reboot or error, rerunning `setup` resumes | 2026-11-14 |
 | 24 | envmgr's own dependencies are declared like any other package: `setup` adopts `git` and `chezmoi` with the provider that installed them, unless the system provides them, and an empty machine starts with the tool and data checkouts in `git/repos` | 2026-11-15 |
 | 25 | Local edits reach the source through `save` (only targets whose source is unchanged since Chezmoi last wrote them); committing and pushing is `publish`, formerly `save`; `adopt` only starts managing targets | 2026-11-17 |
+| 26 | `diff` shows a target changed on both sides as each side's change from the version Chezmoi last wrote, found in the data repository's history by hash; envmgr does not merge, and `save --force` keeps this machine's version only for named targets | 2026-11-17 |

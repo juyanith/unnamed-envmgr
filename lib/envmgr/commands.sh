@@ -359,9 +359,26 @@ envmgr_cmd_drop() {
   return "$rc"
 }
 
+envmgr_cmd_diff() {
+  local machine_dir=""
+  local targets=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) envmgr_usage_error "unknown option for diff: $1" ;;
+      *) targets+=("$(envmgr_absolute_target "$1")") ;;
+    esac
+    shift
+  done
+
+  machine_dir="$(envmgr_active_machine_dir warn)"
+  envmgr_diff_config "$machine_dir" ${targets[@]+"${targets[@]}"}
+}
+
 envmgr_cmd_save() {
   local assume_yes=false
   local dry_run=false
+  local force=false
   local machine_dir=""
   local targets=()
   local rc=0
@@ -370,14 +387,17 @@ envmgr_cmd_save() {
     case "$1" in
       --yes|-y) assume_yes=true ;;
       --dry-run|-n) dry_run=true ;;
+      --force) force=true ;;
       -*) envmgr_usage_error "unknown option for save: $1" ;;
       *) targets+=("$(envmgr_absolute_target "$1")") ;;
     esac
     shift
   done
+  [[ "$force" == false || ${#targets[@]} -gt 0 ]] || \
+    envmgr_usage_error "save --force overwrites source changes, so it needs the targets named"
 
   machine_dir="$(envmgr_active_machine_dir refuse)"
-  envmgr_save_config "$machine_dir" "$assume_yes" "$dry_run" ${targets[@]+"${targets[@]}"} || rc=$?
+  envmgr_save_config "$machine_dir" "$assume_yes" "$dry_run" "$force" ${targets[@]+"${targets[@]}"} || rc=$?
   [[ "$dry_run" == true ]] || envmgr_refresh_checks "$machine_dir"
   return "$rc"
 }

@@ -137,7 +137,7 @@ envmgr_check_config() {
   printf 'config: %d local change(s), %d pending restore\n' "$local_count" "$pending_count"
   printf '%s\n' "${details[@]}"
   ((local_count == 0)) || \
-    printf 'Keep local changes with envmgr save, or discard them with envmgr restore config.\n'
+    printf 'See the changes with envmgr diff. Keep local changes with envmgr save, or\ndiscard them with envmgr restore config.\n'
   return "$ENVMGR_EXIT_DRIFT"
 }
 
@@ -286,13 +286,67 @@ envmgr_config_source_sha() {
   fi
 }
 
+# Return 0 when a target's source changed since Chezmoi last wrote or added
+# it, 1 when it did not, and 2 on error.
+envmgr_config_source_changed() {
+  local machine_dir="$1"
+  local target="$2"
+  local kind="$3"
+  local written=""
+  local current=""
+
+  written="$(envmgr_config_written_sha "$machine_dir" "$target")"
+  current="$(envmgr_config_source_sha "$machine_dir" "$target" "$kind")" || return 2
+  [[ "$written" != "$current" ]] && return 0
+  return 1
+}
+
+# Print the data repository commit that holds the version of a source file
+# Chezmoi last wrote, found by its hash, searching the latest 100 commits
+# that changed the file. Returns 1 when there is none.
+envmgr_config_find_base() {
+  local machine_dir="$1"
+  local target="$2"
+  local source="$3"
+  local data=""
+  local path=""
+  local sha=""
+  local commit=""
+
+  data="$(dirname -- "$(dirname -- "$machine_dir")")"
+  path="${source#"$data"/}"
+  sha="$(envmgr_config_written_sha "$machine_dir" "$target")"
+  [[ -n "$sha" && -e "$data/.git" && "$path" != "$source" ]] || return 1
+  while IFS= read -r commit; do
+    if [[ "$(git -C "$data" show "$commit:$path" 2>/dev/null | envmgr_sha256)" == "$sha" ]]; then
+      printf '%s\n' "$commit"
+      return 0
+    fi
+  done < <(git -C "$data" log -n 100 --format=%h -- "$path" 2>/dev/null)
+  return 1
+}
+
+# Print the kind of a target in $HOME for save and diff: file, symlink, or
+# other (missing, or a directory).
+envmgr_config_target_kind() {
+  if [[ -L "$1" ]]; then
+    printf 'symlink\n'
+  elif [[ -f "$1" ]]; then
+    printf 'file\n'
+  else
+    printf 'other\n'
+  fi
+}
+
 # Copy local edits to managed targets into the machine's config source.
-# Targets whose source also changed since Chezmoi last wrote them, templates,
-# modify_ sources, and deleted or retyped targets are skipped with a reason.
+# Targets whose source also changed since Chezmoi last wrote them (unless
+# force is true; the caller names them), templates, modify_ sources, and
+# deleted or retyped targets are skipped with a reason.
 envmgr_save_config() {
   local machine_dir="$1"
   local assume_yes="$2"
   local dry_run="$3"
+  local force="$4"
   local status=""
   local line=""
   local relative=""
@@ -301,15 +355,14 @@ envmgr_save_config() {
   local source=""
   local name=""
   local kind=""
-  local written=""
-  local current=""
+  local rc=0
   local count=0
   local files=()
   local symlinks=()
   local secrets=()
   local skipped=()
 
-  shift 3
+  shift 4
   if [[ ! -d "$machine_dir/config" ]]; then
     printf 'save: nothing to save\n'
     return 0
@@ -343,22 +396,17 @@ envmgr_save_config() {
         continue
         ;;
     esac
-    if [[ -L "$target" ]]; then
-      kind="symlink"
-    elif [[ -f "$target" ]]; then
-      kind="file"
-    else
-      kind="other"
-    fi
+    kind="$(envmgr_config_target_kind "$target")"
     if [[ "$kind" == other || ( "$kind" == symlink && "$name" != symlink_* ) || \
       ( "$kind" == file && "$name" == symlink_* ) ]]; then
       skipped+=("$shown: changed type here; adopt it again with envmgr drop config, then envmgr adopt config")
       continue
     fi
-    written="$(envmgr_config_written_sha "$machine_dir" "$target")"
-    current="$(envmgr_config_source_sha "$machine_dir" "$target" "$kind")" || return 1
-    if [[ "$written" != "$current" ]]; then
-      skipped+=("$shown: changed both here and in the source; compare them with envmgr evaluate config, then save or restore it")
+    rc=0
+    envmgr_config_source_changed "$machine_dir" "$target" "$kind" || rc=$?
+    [[ "$rc" -le 1 ]] || return 1
+    if [[ "$rc" -eq 0 && "$force" == false ]]; then
+      skipped+=("$shown: changed both here and in the source; see both changes with envmgr diff $shown, then keep this version with envmgr save --force $shown, or the source's with envmgr restore config $shown")
       continue
     fi
     if [[ "$kind" == symlink ]]; then
@@ -404,6 +452,122 @@ envmgr_save_config() {
     envmgr_chezmoi "$machine_dir" add --force "${symlinks[@]}" || return 1
   fi
   printf 'save: saved %d target(s). Run envmgr publish to share them.\n' "$count"
+}
+
+# Print a unified diff between two files with the given labels. Returns 1
+# only on error; a difference is not an error.
+envmgr_config_diff_files() {
+  local rc=0
+
+  diff -u --label "$3" --label "$4" -- "$1" "$2" || rc=$?
+  [[ "$rc" -le 1 ]]
+}
+
+# Show how changed config targets differ from the source: what save would
+# record for a local change, what restore would write for a pending one, and,
+# for a target changed on both sides, each side's change from the version
+# Chezmoi last wrote when the data repository's history still has it.
+envmgr_diff_config() {
+  local machine_dir="$1"
+  local status=""
+  local line=""
+  local relative=""
+  local target=""
+  local shown=""
+  local source=""
+  local name=""
+  local kind=""
+  local base=""
+  local data=""
+  local tmp=""
+  local rc=0
+  local count=0
+
+  shift
+  if [[ ! -d "$machine_dir/config" ]]; then
+    printf 'config: no changes\n'
+    return 0
+  fi
+  envmgr_config_prepare "$machine_dir" || return 1
+  for target in "$@"; do
+    envmgr_config_is_managed "$machine_dir" "$target" || \
+      envmgr_die 1 "$(envmgr_display_path "$target") is not managed; start managing it with envmgr adopt config"
+  done
+  status="$(envmgr_chezmoi "$machine_dir" status --exclude scripts "$@")" || return 1
+  data="$(dirname -- "$(dirname -- "$machine_dir")")"
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    relative="${line:3}"
+    target="$HOME/$relative"
+    shown="$(envmgr_display_path "$target")"
+    # Targets with no source are being removed from an exact_ directory.
+    source="$(envmgr_config_source_paths "$machine_dir" "$target" 2>/dev/null)" || source=""
+    name="$(basename -- "${source:-none}")"
+    count=$((count + 1))
+    ((count == 1)) || printf '\n'
+
+    if [[ -z "$source" ]]; then
+      printf '%s: not in the source; envmgr restore config would delete it\n' "$shown"
+      continue
+    fi
+    if [[ "${line:0:1}" == " " ]]; then
+      printf '%s: changed in the source; envmgr restore config would apply this\n' "$shown"
+      [[ "$name" != encrypted_* ]] || { printf '  (encrypted; contents not shown)\n'; continue; }
+      envmgr_chezmoi "$machine_dir" diff --no-pager --exclude scripts "$target" || return 1
+      continue
+    fi
+
+    kind="$(envmgr_config_target_kind "$target")"
+    rc=1
+    if [[ "${line:0:1}" != D && "$kind" != other ]]; then
+      rc=0
+      envmgr_config_source_changed "$machine_dir" "$target" "$kind" || rc=$?
+      [[ "$rc" -le 1 ]] || return 1
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+      printf '%s: changed here; envmgr save would record this\n' "$shown"
+      [[ "$name" != encrypted_* ]] || { printf '  (encrypted; contents not shown)\n'; continue; }
+      envmgr_chezmoi "$machine_dir" diff --no-pager --reverse --exclude scripts "$target" || return 1
+      continue
+    fi
+
+    base=""
+    if [[ "$kind" == file && "$name" != *.tmpl && "$name" != encrypted_* ]]; then
+      base="$(envmgr_config_find_base "$machine_dir" "$target" "$source")" || base=""
+    fi
+    if [[ -z "$base" ]]; then
+      printf '%s: changed both here and in the source\n' "$shown"
+      [[ "$name" != encrypted_* ]] || printf '  (encrypted; contents not shown)\n'
+      if [[ "$name" != encrypted_* ]]; then
+        printf 'The version last restored is not in the data repository history, so\n'
+        printf 'this compares the source with this machine'"'"'s file.\n'
+        envmgr_chezmoi "$machine_dir" diff --no-pager --reverse --exclude scripts "$target" || return 1
+      fi
+    else
+      printf '%s: changed both here and in the source since it was restored from %s\n' "$shown" "$base"
+      tmp="$(mktemp "${TMPDIR:-/tmp}/envmgr-diff.XXXXXX")"
+      rc=0
+      git -C "$data" show "$base:${source#"$data"/}" >"$tmp" || rc=1
+      if [[ "$rc" -eq 0 ]]; then
+        printf 'Changed here:\n'
+        envmgr_config_diff_files "$tmp" "$target" "$shown ($base)" "$shown (here)" || rc=1
+      fi
+      if [[ "$rc" -eq 0 ]]; then
+        printf 'Changed in the source:\n'
+        envmgr_chezmoi "$machine_dir" cat "$target" | \
+          envmgr_config_diff_files "$tmp" - "$shown ($base)" "$shown (source)" || rc=1
+      fi
+      rm -f -- "$tmp"
+      [[ "$rc" -eq 0 ]] || return 1
+    fi
+    printf 'Keep this version:     envmgr save --force %s\n' "$shown"
+    printf 'Keep the source'"'"'s:     envmgr restore config %s\n' "$shown"
+    printf 'To combine them, edit the file here, then save it with --force.\n'
+  done <<<"$status"
+
+  ((count)) || printf 'config: no changes\n'
+  return 0
 }
 
 # File names that must be encrypted to adopt. Returns 1 for *.pub, which is

@@ -60,6 +60,8 @@ Commands:
       Add installed packages to this machine's manifest.
   check [config|package [provider]|system] [--offline]
       Report drift from the data repository; exits 3 when there is drift.
+  diff [target...]
+      Show how changed config files differ from this machine's source.
   drop config [--delete] [--yes] [--dry-run] <target...>
       Stop managing targets; --delete also deletes the files.
   drop package [--delete] [--yes] [--dry-run] <provider> <package...>
@@ -90,6 +92,8 @@ Commands:
       Apply system units that are out of sync, or all of them with --force.
   save [target...] [--yes] [--dry-run]
       Copy local edits to managed config files into this machine's source.
+  save --force <target...> [--yes] [--dry-run]
+      Save the targets even when their source changed too, discarding that.
   setup
       Install prerequisites, clone the data repository, and select a machine.
 
@@ -111,6 +115,7 @@ main() {
     list) envmgr_cmd_list "$@" ;;
     restore) envmgr_cmd_restore "$@" ;;
     adopt) envmgr_cmd_adopt "$@" ;;
+    diff) envmgr_cmd_diff "$@" ;;
     drop) envmgr_cmd_drop "$@" ;;
     evaluate) envmgr_cmd_evaluate "$@" ;;
     migrate) envmgr_cmd_migrate "$@" ;;
