@@ -27,7 +27,9 @@ $report
 
 Evaluate whether the machine's files under machines/$machine/ match its
 SPEC.md and explain any drift above. Propose changes, and make the ones the
-user approves.
+user approves. Local config changes are edits under ~ that are not in the
+source yet: the user keeps them with envmgr save or discards them with
+envmgr restore config.
 
 Boundaries:
 - You may edit files under machines/$machine/ and the repository's
@@ -36,7 +38,7 @@ Boundaries:
   outside this repository.
 - Do not decrypt encrypted_ files or read the age key.
 - Do not commit or push. When you are done, summarize the changes so the user
-  can review them, run envmgr restore, and commit.
+  can review them, run envmgr restore, and run envmgr publish.
 EOF
 }
 
@@ -178,7 +180,7 @@ Boundaries:
   this repository, or commit or push.
 - When you are done, summarize the changes and tell the user to run
   envmgr restore config --dry-run, then envmgr restore config, then
-  envmgr save.
+  envmgr publish.
 EOF
 }
 

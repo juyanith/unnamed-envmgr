@@ -32,14 +32,6 @@ envmgr_unit_description() {
   awk 'NR > 1 && /^#[^!]/ { sub(/^#[[:space:]]*/, ""); print; exit }' "$apply"
 }
 
-envmgr_sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | awk '{ print $1 }'
-  else
-    shasum -a 256 | awk '{ print $1 }'
-  fi
-}
-
 # Hash of the unit's files plus the current contents of its watched targets.
 envmgr_unit_hash() {
   local unit_dir="$1"

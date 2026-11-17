@@ -9,8 +9,9 @@ it. See [DESIGN.md](DESIGN.md) for the full specification.
 
 **Status:** ready for testing. Every command in DESIGN.md is implemented:
 `setup`, `init`, `check`, `list`, `restore`, `adopt` (including
-`--encrypt`), `drop`, `evaluate`, `migrate`, `save`, system units, and the `git`,
-`homebrew`, `omarchy`, `flatpak`, and `rpm-ostree` providers.
+`--encrypt`), `drop`, `evaluate`, `migrate`, `save`, `publish`, system
+units, and the `git`, `homebrew`, `omarchy`, `flatpak`, and `rpm-ostree`
+providers.
 
 ## Requirements
 
@@ -57,7 +58,7 @@ steps. It:
 7. Declares Git and Chezmoi in the machine's Homebrew or Omarchy packages
    if they were installed that way and aren't declared yet, so
    `envmgr restore` keeps them upgraded.
-8. Offers to commit and push a new or changed machine with `envmgr save`.
+8. Offers to commit and push a new or changed machine with `envmgr publish`.
 9. Offers to run `envmgr restore`, which previews and confirms packages, then
    config, then system units.
 10. Prints the machine's `POSTINSTALL.md`, if it has one: manual steps such as
@@ -77,12 +78,30 @@ While drift remains, `~/.local/state/envmgr/change_summary` exists.
 `envmgr restore` exits `75` when a reboot or re-login is needed; rerun it
 afterward.
 
+## Keeping changes
+
+Edits you make to managed files in your home directory stay local until you
+save them into this machine's source, then publish them so other machines
+can restore them:
+
+```sh
+envmgr check config       # edited files show as local changes
+envmgr save               # copy local edits into the source (or name targets)
+envmgr publish            # commit this machine's directory and push it
+```
+
+`save` skips templates and `modify_` files (edit their source instead), and
+any file that also changed in the source since it was last restored, so a
+pulled change is never overwritten. Start managing a new file with
+`envmgr adopt config`, then publish.
+
 ## Other commands
 
 `envmgr --help` lists every command with its options. The most common:
 
 ```sh
 envmgr adopt config ~/.config/example  # start managing a file or directory
+                                       # (or the new files in a managed one)
 envmgr adopt config --encrypt ~/.netrc # secrets: stored only as ciphertext
 envmgr adopt config --from <id> ~/.x   # copy config only another machine has
 envmgr adopt package <provider> <pkg>  # add an installed package
@@ -96,7 +115,8 @@ envmgr list [config|package|system]    # list what this machine manages
 envmgr migrate <url>                   # move envmgr-data to an empty remote
 envmgr migrate --no-history <url>      # or move a copy of its current files
 envmgr migrate --follow <url>          # then, on every other machine
-envmgr save                            # commit this machine's changes, push
+envmgr save [target...]                # copy local edits into the source
+envmgr publish                         # commit this machine's changes, push
 ```
 
 The first `--encrypt` creates `~/.config/envmgr/age.key`. Back it up (a

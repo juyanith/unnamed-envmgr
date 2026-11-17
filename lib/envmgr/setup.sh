@@ -556,7 +556,7 @@ envmgr_setup_tools() {
   fi
 }
 
-envmgr_setup_save() {
+envmgr_setup_publish() {
   local machine=""
   local data=""
 
@@ -564,15 +564,15 @@ envmgr_setup_save() {
   data="$(envmgr_data_dir)"
   [[ -e "$data/.git" ]] || return 0
   [[ -n "$(git -C "$data" status --porcelain -- "machines/$machine")" ]] || return 0
-  envmgr_setup_step "Save"
+  envmgr_setup_step "Publish"
   printf 'Machine %s has changes that are not in the data repository yet.\n' "$machine"
   if ! envmgr_ask_no "Commit and push them now?"; then
-    printf 'Not saved. Run envmgr save when you are ready.\n'
+    printf 'Not published. Run envmgr publish when you are ready.\n'
     return 0
   fi
-  # A failed save (for example, no push access yet) does not stop setup.
-  (envmgr_cmd_save --yes) || \
-    envmgr_warn "machine $machine was not saved; run envmgr save once the problem is fixed"
+  # A failed publish (for example, no push access yet) does not stop setup.
+  (envmgr_cmd_publish --yes) || \
+    envmgr_warn "machine $machine was not published; run envmgr publish once the problem is fixed"
 }
 
 # Run envmgr restore. A reboot or a failure ends setup; running setup again
@@ -629,7 +629,7 @@ envmgr_cmd_setup() {
   envmgr_setup_age_key
   envmgr_setup_agent
   envmgr_setup_tools
-  envmgr_setup_save
+  envmgr_setup_publish
   envmgr_setup_restore
   envmgr_setup_postinstall
   exec 3<&-

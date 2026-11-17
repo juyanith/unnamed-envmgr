@@ -331,7 +331,7 @@ test_adopt_config_from_another_machine() {
   run_envmgr adopt config --from other "$HOME/.config/example"
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "Copied ~/.config/example/a.toml"
-  assert_contains "$out" "envmgr save"
+  assert_contains "$out" "envmgr publish"
   assert_eq "$(cat "$cfg/dot_config/example/a.toml")" a
   [[ -f "$cfg/dot_config/example/sub/executable_b.sh" ]] || fail "attributes not kept"
   [[ ! -e "$cfg/private_dot_config" ]] || fail "created a second source for ~/.config"
@@ -380,6 +380,119 @@ test_adopt_refuses_partially_managed_target() {
   run_envmgr adopt config "$HOME/.bashrc"
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "partially managed"
+}
+
+test_adopt_refuses_managed_file_and_adds_new_files_in_directory() {
+  selected_mac
+  mkdir -p "$HOME/.config/tool"
+  printf 'a\n' >"$HOME/.config/tool/a.conf"
+  run_envmgr adopt config "$HOME/.config/tool"
+  assert_eq "$rc" 0 "$out"
+
+  printf 'a2\n' >"$HOME/.config/tool/a.conf"
+  run_envmgr adopt config "$HOME/.config/tool/a.conf"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "already managed; keep local edits with envmgr save"
+  run_envmgr adopt config "$HOME/.config/tool"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Nothing new to adopt in ~/.config/tool"
+  run_envmgr adopt config --exact "$HOME/.config/tool"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "only when a directory is first adopted"
+
+  # Only the new file is added; the edited one keeps its source.
+  mkdir -p "$HOME/.config/tool/sub"
+  printf 'b\n' >"$HOME/.config/tool/sub/b.conf"
+  run_envmgr adopt config "$HOME/.config/tool"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Adopted ~/.config/tool/sub/b.conf"
+  [[ "$out" != *"Adopted ~/.config/tool/a.conf"* ]] || fail "re-adopted a managed file"
+  assert_eq "$(cat "$cfg/dot_config/tool/sub/b.conf")" b
+  assert_eq "$(cat "$cfg/dot_config/tool/a.conf")" a
+}
+
+test_save_copies_local_edits() {
+  selected_mac
+  printf 'a\n' >"$cfg/dot_alpha"
+  printf 'b\n' >"$cfg/dot_beta"
+  printf 'c\n' >"$cfg/dot_gamma"
+  printf 'd\n' >"$cfg/dot_delta"
+  printf 'e\n' >"$cfg/dot_eps"
+  printf '{{ "t" }}\n' >"$cfg/dot_tmpl.tmpl"
+  printf '.alpha' >"$cfg/symlink_dot_link"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "save: nothing to save"
+
+  printf 'a2\n' >"$HOME/.alpha"
+  printf 'b-source\n' >"$cfg/dot_beta"
+  printf 'c2\n' >"$HOME/.gamma"
+  printf 'c-source\n' >"$cfg/dot_gamma"
+  rm "$HOME/.delta"
+  printf 'e2\n' >"$HOME/.eps"
+  printf 't2\n' >"$HOME/.tmpl"
+  rm "$HOME/.link"
+  ln -s .eps "$HOME/.link"
+
+  run_envmgr check config
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "Keep local changes with envmgr save"
+  run_envmgr save "$HOME/.missing"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "is not managed; start managing it with envmgr adopt config"
+
+  run_envmgr save --dry-run
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "save: 3 target(s) will be saved"
+  assert_contains "$out" "+a2"
+  assert_contains "$out" "not saving ~/.gamma: changed both here and in the source"
+  assert_contains "$out" "not saving ~/.delta: deleted here"
+  assert_contains "$out" "not saving ~/.tmpl: a template"
+  [[ "$out" != *"~/.beta"* ]] || fail "offered to save a source-only change"
+  assert_eq "$(cat "$cfg/dot_alpha")" a "dry run saved"
+  run_envmgr save
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "rerun with --yes"
+
+  # Named targets limit the save.
+  run_envmgr save --yes "$HOME/.eps"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "saved 1 target(s). Run envmgr publish"
+  assert_eq "$(cat "$cfg/dot_eps")" e2
+  assert_eq "$(cat "$cfg/dot_alpha")" a
+
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "saved 2 target(s)"
+  assert_eq "$(cat "$cfg/dot_alpha")" a2
+  assert_eq "$(cat "$cfg/symlink_dot_link")" .eps
+  assert_eq "$(cat "$cfg/dot_beta")" b-source
+  assert_eq "$(cat "$cfg/dot_gamma")" c-source
+  assert_eq "$(cat "$cfg/dot_tmpl.tmpl")" '{{ "t" }}'
+  [[ -f "$cfg/dot_delta" ]] || fail "deleted target's source removed"
+  run_envmgr save --bogus
+  assert_eq "$rc" 2 "$out"
+}
+
+test_save_keeps_encryption() {
+  selected_mac
+  printf 'very-secret\n' >"$HOME/.netrc"
+  run_envmgr adopt config --encrypt "$HOME/.netrc"
+  assert_eq "$rc" 0 "$out"
+  printf 'new-secret\n' >"$HOME/.netrc"
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "~/.netrc (encrypted; contents not shown)"
+  [[ "$out" != *new-secret* ]] || fail "printed the secret"
+  local source=""
+  source="$(find "$cfg" -name 'encrypted_*')"
+  [[ -n "$source" ]] || fail "no encrypted source"
+  ! grep -q new-secret "$source" || fail "source holds plaintext"
+  assert_eq "$(cz mac decrypt "$source")" new-secret
+  run_envmgr check config
+  assert_eq "$rc" 0 "$out"
 }
 
 test_drop_keeps_local_copy() {
@@ -948,7 +1061,7 @@ test_setup_clones_and_selects_machine() {
   run_setup "$data_origin" "~/Work/data" 1 codex y y
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "1) mac  Desk Mac"
-  [[ "$out" != *"== Save"* ]] || fail "offered to save an unchanged machine"
+  [[ "$out" != *"== Publish"* ]] || fail "offered to publish an unchanged machine"
   assert_contains "$out" "Restore mac now?"
   assert_contains "$out" "config: restored 1 target(s)"
   assert_eq "$(cat "$HOME/.x")" x
@@ -981,7 +1094,7 @@ test_setup_new_machine_and_skip() {
   assert_contains "$(cat "$HOME/Work/Git/envmgr-data/machines/laptop/machine.conf")" "description=Test laptop"
   assert_contains "$out" "Enter a number, n, or s."
   assert_contains "$out" "Created machine laptop from mac."
-  assert_contains "$out" "save: pushed to origin/main"
+  assert_contains "$out" "publish: pushed to origin/main"
   git -C "$data_origin" cat-file -e main:machines/laptop/machine.conf || fail "laptop not pushed"
   assert_contains "$out" "Skipped. Run envmgr restore"
   [[ -f "$HOME/Work/Git/envmgr-data/machines/laptop/config/dot_x" ]] || fail "machine not copied"
@@ -1126,14 +1239,14 @@ test_setup_declares_tools() {
   assert_contains "$out" "git is not installed with homebrew; leaving it undeclared."
   assert_contains "$out" "chezmoi is not installed with homebrew; leaving it undeclared."
   [[ ! -e "$(dirname "$brewfile")" ]] || fail "left an empty homebrew directory"
-  [[ "$out" != *"== Save"* ]] || fail "offered to save an unchanged machine"
+  [[ "$out" != *"== Publish"* ]] || fail "offered to publish an unchanged machine"
 
   printf 'chezmoi\n' >"$FAKE_BREW_STATE/formulae"
   run_setup y n
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "package/homebrew: adopted brew chezmoi"
   assert_eq "$(cat "$brewfile")" 'brew "chezmoi"'
-  assert_contains "$out" "save: pushed to origin/main"
+  assert_contains "$out" "publish: pushed to origin/main"
 
   printf 'git\n' >>"$FAKE_BREW_STATE/formulae"
   run_setup y n
@@ -1363,7 +1476,7 @@ test_evaluate_from_compares_machines() {
   assert_contains "$args" "only there  .onlythere"
   assert_contains "$args" "is missing on this machine"
   assert_contains "$args" "edit only files under"
-  assert_contains "$args" "envmgr save."
+  assert_contains "$args" "envmgr publish."
   [[ "$args" != *example-content* ]] || fail "prompt includes source contents"
 
   # Targets narrow the comparison; with nothing to copy, no agent starts.
@@ -1599,12 +1712,12 @@ test_setup_accepts_pasted_age_key() {
   [[ ! -e "$HOME/.config/envmgr/age.key.new" ]] || fail "left the temporary key"
 }
 
-test_save_commits_and_pushes() {
+test_publish_commits_and_pushes() {
   data_checkout
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 0 "$out"
-  assert_contains "$out" "nothing to save for mac"
+  assert_contains "$out" "nothing to publish for mac"
 
   mkdir -p "$HOME/.config/example"
   printf 'a\n' >"$HOME/.config/example/a.toml"
@@ -1615,7 +1728,7 @@ test_save_commits_and_pushes() {
   printf 'staged\n' >"$data/top"
   git -C "$data" add top
 
-  run_envmgr save --dry-run
+  run_envmgr publish --dry-run
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "config/dot_config/example/a.toml"
   assert_contains "$out" "config: dot_config/example/a.toml"
@@ -1623,11 +1736,11 @@ test_save_commits_and_pushes() {
   assert_contains "$out" "machines/other/"
   assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 0 "dry run committed"
 
-  run_envmgr save
+  run_envmgr publish
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "rerun with --yes"
 
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "pushed to origin/main"
   assert_eq "$(git -C "$data" rev-parse HEAD)" "$(git --git-dir="$data_origin" rev-parse main)"
@@ -1638,19 +1751,22 @@ test_save_commits_and_pushes() {
   assert_contains "$(git -C "$data" status --porcelain)" "?? machines/other/"
 
   printf 'b\n' >"$HOME/.config/example/a.toml"
-  run_envmgr adopt config "$HOME/.config/example/a.toml"
-  run_envmgr save --no-push -m "Tweak example" --yes
+  run_envmgr publish --dry-run
+  assert_contains "$out" "1 config target(s) have local edits that are not saved"
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  run_envmgr publish --no-push -m "Tweak example" --yes
   assert_eq "$rc" 0 "$out"
   assert_eq "$(git -C "$data" log -1 --format=%s)" "Tweak example"
   assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 1
-  # A later save pushes earlier commits even with nothing new to commit.
-  run_envmgr save --yes
+  # A later publish pushes earlier commits even with nothing new to commit.
+  run_envmgr publish --yes
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "1 earlier commit(s) are not pushed yet"
   assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 0
 }
 
-test_save_rebases_onto_other_machines() {
+test_publish_rebases_onto_other_machines() {
   data_checkout
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
   git clone -q "$data_origin" "$work/second"
@@ -1662,13 +1778,13 @@ test_save_rebases_onto_other_machines() {
   printf 'z\n' >"$data/machines/mac/config/dot_z"
   printf 'dirty\n' >>"$data/machines/other/machine.conf"
   printf 'untracked\n' >"$data/README"
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "would block pulling them"
   assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 0 "committed before refusing"
   git -C "$data" checkout -q -- machines/other/machine.conf
 
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "origin has 1 new commit(s)"
   assert_eq "$(git -C "$data" rev-parse HEAD)" "$(git --git-dir="$data_origin" rev-parse main)"
@@ -1684,12 +1800,12 @@ test_save_rebases_onto_other_machines() {
   git -C "$data" add top
   git -C "$data" commit -qm top
   printf 'z2\n' >"$data/machines/mac/config/dot_z"
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "local commits change files outside machines/mac"
 }
 
-test_save_conflict_keeps_local_commit() {
+test_publish_conflict_keeps_local_commit() {
   data_checkout
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
   git clone -q "$data_origin" "$work/second"
@@ -1698,7 +1814,7 @@ test_save_conflict_keeps_local_commit() {
   git -C "$work/second" push -q origin main
 
   printf 'ours\n' >"$data/machines/mac/config/dot_x"
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "the commit is local only"
   assert_eq "$(git -C "$data" branch --show-current)" main "rebase not aborted"
@@ -1706,35 +1822,35 @@ test_save_conflict_keeps_local_commit() {
   assert_eq "$(cat "$data/machines/mac/config/dot_x")" ours
 }
 
-test_save_refuses_plaintext_secrets_and_wrong_branch() {
+test_publish_refuses_plaintext_secrets_and_wrong_branch() {
   data_checkout
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
   local cfg="$data/machines/mac/config"
   printf 'x\n' >"$cfg/encrypted_private_dot_netrc.age"
   printf 'plain\n' >"$cfg/private_dot_netrc"
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "plaintext copy of an encrypted target"
   rm "$cfg/private_dot_netrc"
 
   printf 'AGE-SECRET-KEY-1ABC\n' >"$cfg/dot_keyfile"
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "looks like a secret"
   rm "$cfg/dot_keyfile"
   mkdir -p "$cfg/private_dot_ssh"
   printf 'k\n' >"$cfg/private_dot_ssh/id_ed25519"
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "looks like a secret"
   rm -r "$cfg/private_dot_ssh"
   assert_eq "$(git -C "$data" rev-list --count origin/main..HEAD)" 0
 
   git -C "$data" checkout -q -b feature
-  run_envmgr save --yes
+  run_envmgr publish --yes
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "on branch feature, expected main"
-  run_envmgr save --bogus
+  run_envmgr publish --bogus
   assert_eq "$rc" 2 "$out"
 }
 

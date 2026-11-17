@@ -359,6 +359,29 @@ envmgr_cmd_drop() {
   return "$rc"
 }
 
+envmgr_cmd_save() {
+  local assume_yes=false
+  local dry_run=false
+  local machine_dir=""
+  local targets=()
+  local rc=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --yes|-y) assume_yes=true ;;
+      --dry-run|-n) dry_run=true ;;
+      -*) envmgr_usage_error "unknown option for save: $1" ;;
+      *) targets+=("$(envmgr_absolute_target "$1")") ;;
+    esac
+    shift
+  done
+
+  machine_dir="$(envmgr_active_machine_dir refuse)"
+  envmgr_save_config "$machine_dir" "$assume_yes" "$dry_run" ${targets[@]+"${targets[@]}"} || rc=$?
+  [[ "$dry_run" == true ]] || envmgr_refresh_checks "$machine_dir"
+  return "$rc"
+}
+
 envmgr_cmd_drop_package() {
   local delete=false
   local assume_yes=false

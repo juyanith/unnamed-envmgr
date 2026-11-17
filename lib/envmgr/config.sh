@@ -136,6 +136,8 @@ envmgr_check_config() {
   fi
   printf 'config: %d local change(s), %d pending restore\n' "$local_count" "$pending_count"
   printf '%s\n' "${details[@]}"
+  ((local_count == 0)) || \
+    printf 'Keep local changes with envmgr save, or discard them with envmgr restore config.\n'
   return "$ENVMGR_EXIT_DRIFT"
 }
 
@@ -249,6 +251,161 @@ envmgr_restore_config() {
   printf 'config: restored %d target(s)\n' "$count"
 }
 
+# Count config targets edited in $HOME since Chezmoi last wrote them.
+envmgr_config_local_count() {
+  local machine_dir="$1"
+  local status=""
+
+  status="$(envmgr_config_status "$machine_dir")" || return 1
+  printf '%s\n' "$status" | awk 'length($0) > 0 && substr($0, 1, 1) != " " { n++ } END { print n + 0 }'
+}
+
+# Print the SHA-256 Chezmoi recorded when it last wrote or added a target, or
+# nothing when it has no record.
+envmgr_config_written_sha() {
+  local machine_dir="$1"
+  local target="$2"
+
+  envmgr_chezmoi "$machine_dir" state get --bucket=entryState --key="$target" 2>/dev/null | \
+    sed -n 's/.*"contentsSHA256": *"\([0-9a-f]*\)".*/\1/p'
+}
+
+# Print the SHA-256 of a target's content in the source, hashed as Chezmoi
+# records it: a symlink's link target has no trailing newline.
+envmgr_config_source_sha() {
+  local machine_dir="$1"
+  local target="$2"
+  local kind="$3"
+  local content=""
+
+  if [[ "$kind" == symlink ]]; then
+    content="$(envmgr_chezmoi "$machine_dir" cat "$target")" || return 1
+    printf '%s' "$content" | envmgr_sha256
+  else
+    envmgr_chezmoi "$machine_dir" cat "$target" | envmgr_sha256
+  fi
+}
+
+# Copy local edits to managed targets into the machine's config source.
+# Targets whose source also changed since Chezmoi last wrote them, templates,
+# modify_ sources, and deleted or retyped targets are skipped with a reason.
+envmgr_save_config() {
+  local machine_dir="$1"
+  local assume_yes="$2"
+  local dry_run="$3"
+  local status=""
+  local line=""
+  local relative=""
+  local target=""
+  local shown=""
+  local source=""
+  local name=""
+  local kind=""
+  local written=""
+  local current=""
+  local count=0
+  local files=()
+  local symlinks=()
+  local secrets=()
+  local skipped=()
+
+  shift 3
+  if [[ ! -d "$machine_dir/config" ]]; then
+    printf 'save: nothing to save\n'
+    return 0
+  fi
+  envmgr_config_prepare "$machine_dir" || return 1
+  for target in "$@"; do
+    envmgr_config_is_managed "$machine_dir" "$target" || \
+      envmgr_die 1 "$(envmgr_display_path "$target") is not managed; start managing it with envmgr adopt config"
+  done
+  status="$(envmgr_chezmoi "$machine_dir" status --exclude scripts "$@")" || return 1
+
+  while IFS= read -r line; do
+    # Column one: last written state versus the actual target.
+    [[ -n "$line" && "${line:0:1}" != " " ]] || continue
+    relative="${line:3}"
+    target="$HOME/$relative"
+    shown="$(envmgr_display_path "$target")"
+    if [[ "${line:0:1}" == D ]]; then
+      skipped+=("$shown: deleted here; restore it with envmgr restore config, or stop managing it with envmgr drop config")
+      continue
+    fi
+    source="$(envmgr_config_source_paths "$machine_dir" "$target")" || return 1
+    name="$(basename -- "$source")"
+    case "$name" in
+      modify_*)
+        skipped+=("$shown: partially managed; edit $(envmgr_display_path "$source") instead")
+        continue
+        ;;
+      *.tmpl)
+        skipped+=("$shown: a template; edit $(envmgr_display_path "$source") instead")
+        continue
+        ;;
+    esac
+    if [[ -L "$target" ]]; then
+      kind="symlink"
+    elif [[ -f "$target" ]]; then
+      kind="file"
+    else
+      kind="other"
+    fi
+    if [[ "$kind" == other || ( "$kind" == symlink && "$name" != symlink_* ) || \
+      ( "$kind" == file && "$name" == symlink_* ) ]]; then
+      skipped+=("$shown: changed type here; adopt it again with envmgr drop config, then envmgr adopt config")
+      continue
+    fi
+    written="$(envmgr_config_written_sha "$machine_dir" "$target")"
+    current="$(envmgr_config_source_sha "$machine_dir" "$target" "$kind")" || return 1
+    if [[ "$written" != "$current" ]]; then
+      skipped+=("$shown: changed both here and in the source; compare them with envmgr evaluate config, then save or restore it")
+      continue
+    fi
+    if [[ "$kind" == symlink ]]; then
+      symlinks+=("$target")
+    elif [[ "$name" == encrypted_* ]]; then
+      secrets+=("$target")
+    else
+      files+=("$target")
+    fi
+  done <<<"$status"
+
+  for line in ${skipped[@]+"${skipped[@]}"}; do
+    envmgr_warn "not saving $line"
+  done
+  count=$((${#files[@]} + ${#symlinks[@]} + ${#secrets[@]}))
+  if ((count == 0)); then
+    printf 'save: nothing to save\n'
+    return 0
+  fi
+
+  printf 'save: %d target(s) will be saved to %s\n' "$count" \
+    "$(envmgr_display_path "$machine_dir/config")"
+  if ((${#files[@]} + ${#symlinks[@]})); then
+    envmgr_chezmoi "$machine_dir" diff --no-pager --reverse \
+      ${files[@]+"${files[@]}"} ${symlinks[@]+"${symlinks[@]}"} || return 1
+  fi
+  for target in ${secrets[@]+"${secrets[@]}"}; do
+    printf '%s (encrypted; contents not shown)\n' "$(envmgr_display_path "$target")"
+  done
+  [[ "$dry_run" == true ]] && return 0
+  envmgr_confirm "Save $count config target(s)?" "$assume_yes" || {
+    printf 'save: cancelled\n'
+    return 1
+  }
+
+  # re-add keeps each source's name, so encryption and attributes carry over;
+  # it does not update symlinks, which add replaces.
+  if ((${#files[@]} + ${#secrets[@]})); then
+    envmgr_chezmoi "$machine_dir" re-add \
+      ${files[@]+"${files[@]}"} ${secrets[@]+"${secrets[@]}"} || return 1
+  fi
+  if ((${#symlinks[@]})); then
+    envmgr_chezmoi "$machine_dir" add --force "${symlinks[@]}" || return 1
+  fi
+  printf 'save: saved %d target(s). Run envmgr publish to share them.\n' "$count"
+}
+
 # File names that must be encrypted to adopt. Returns 1 for *.pub, which is
 # never a secret, and 2 when the name alone does not decide.
 envmgr_looks_secret_name() {
@@ -277,24 +434,50 @@ envmgr_adopt_config() {
   local target=""
   local file=""
   local source=""
+  local managed=""
+  local found=false
+  local adds=()
   local add_args=()
 
   shift 3
   mkdir -p -- "$machine_dir/config"
+  managed="$(envmgr_chezmoi "$machine_dir" managed --include files,symlinks --path-style absolute)" || \
+    return 1
 
+  # Each target is added whole, except a directory that is already managed:
+  # only the files inside it that are not managed yet are added.
   for target in "$@"; do
     [[ -e "$target" || -L "$target" ]] || envmgr_die 1 "target does not exist: $target"
     [[ "$target" != "$(envmgr_age_key_file)" ]] || \
       envmgr_die 1 "the age key must never be committed: $target"
-    if envmgr_config_is_managed "$machine_dir" "$target"; then
-      source="$(envmgr_config_source_paths "$machine_dir" "$target")"
-      case "$(basename -- "$source")" in
-        modify_*)
-          envmgr_die 1 "$target is partially managed by $source; edit that script instead"
-          ;;
-      esac
+    if ! envmgr_config_is_managed "$machine_dir" "$target"; then
+      adds+=("$target")
+      continue
     fi
-    [[ "$encrypt" == true ]] && continue
+    source="$(envmgr_config_source_paths "$machine_dir" "$target")"
+    case "$(basename -- "$source")" in
+      modify_*)
+        envmgr_die 1 "$target is partially managed by $source; edit that script instead"
+        ;;
+    esac
+    [[ -d "$target" && ! -L "$target" ]] || \
+      envmgr_die 1 "$(envmgr_display_path "$target") is already managed; keep local edits with envmgr save"
+    [[ "$exact" == false ]] || \
+      envmgr_die 1 "$(envmgr_display_path "$target") is already managed; --exact applies only when a directory is first adopted"
+    found=false
+    while IFS= read -r file; do
+      printf '%s\n' "$managed" | grep -Fxq -- "$file" && continue
+      adds+=("$file")
+      found=true
+    done < <(find "$target" \( -type f -o -type l \) -print)
+    [[ "$found" == true ]] || \
+      printf 'Nothing new to adopt in %s; keep edits to managed files with envmgr save.\n' \
+        "$(envmgr_display_path "$target")"
+  done
+  ((${#adds[@]})) || return 0
+
+  for target in "${adds[@]}"; do
+    [[ "$encrypt" == true ]] && break
     while IFS= read -r file; do
       if envmgr_looks_secret "$file"; then
         envmgr_die 1 "$file looks like a secret; adopt it with --encrypt"
@@ -313,7 +496,7 @@ envmgr_adopt_config() {
   if [[ "$exact" == true ]]; then
     envmgr_warn "exact directories delete unmanaged files inside them on restore"
   fi
-  for target in "$@"; do
+  for target in "${adds[@]}"; do
     envmgr_chezmoi "$machine_dir" add --force ${add_args[@]+"${add_args[@]}"} "$target" || return 1
     printf 'Adopted %s\n' "$(envmgr_display_path "$target")"
   done
@@ -449,7 +632,7 @@ envmgr_adopt_config_from() {
   if [[ "$encrypted" == true && ! -f "$(envmgr_age_key_file)" ]]; then
     envmgr_warn "encrypted files need ~/.config/envmgr/age.key; copy it from another machine"
   fi
-  printf 'Adopted from %s. Run envmgr restore config --dry-run, then envmgr restore config, then envmgr save.\n' "$from"
+  printf 'Adopted from %s. Run envmgr restore config --dry-run, then envmgr restore config, then envmgr publish.\n' "$from"
 }
 
 envmgr_drop_config() {
