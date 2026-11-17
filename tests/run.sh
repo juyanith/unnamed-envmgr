@@ -439,6 +439,7 @@ test_save_copies_local_edits() {
   run_envmgr check config
   assert_eq "$rc" 3 "$out"
   assert_contains "$out" "Keep local changes with envmgr save"
+  assert_contains "$out" "See the changes with envmgr diff"
   run_envmgr save "$HOME/.missing"
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "is not managed; start managing it with envmgr adopt config"
@@ -448,6 +449,8 @@ test_save_copies_local_edits() {
   assert_contains "$out" "save: 3 target(s) will be saved"
   assert_contains "$out" "+a2"
   assert_contains "$out" "not saving ~/.gamma: changed both here and in the source"
+  assert_contains "$out" "envmgr diff ~/.gamma"
+  assert_contains "$out" "envmgr save --force ~/.gamma"
   assert_contains "$out" "not saving ~/.delta: deleted here"
   assert_contains "$out" "not saving ~/.tmpl: a template"
   [[ "$out" != *"~/.beta"* ]] || fail "offered to save a source-only change"
@@ -474,6 +477,73 @@ test_save_copies_local_edits() {
   [[ -f "$cfg/dot_delta" ]] || fail "deleted target's source removed"
   run_envmgr save --bogus
   assert_eq "$rc" 2 "$out"
+
+  # --force keeps this machine's version over a source change, but only for
+  # targets named on the command line.
+  run_envmgr save --force --yes
+  assert_eq "$rc" 2 "$out"
+  assert_contains "$out" "needs the targets named"
+  run_envmgr save --force --yes "$HOME/.gamma"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "saved 1 target(s)"
+  assert_eq "$(cat "$cfg/dot_gamma")" c2
+}
+
+test_diff_shows_each_side() {
+  data_checkout
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  local cfg="$data/machines/mac/config"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  run_envmgr diff
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "config: no changes"
+
+  printf 'x-here\n' >"$HOME/.x"
+  run_envmgr diff
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "~/.x: changed here; envmgr save would record this"
+  assert_contains "$out" "+x-here"
+
+  local base=""
+  base="$(git -C "$data" log -1 --format=%h -- machines/mac/config/dot_x)"
+  printf 'x-source\n' >"$cfg/dot_x"
+  git -C "$data" commit -qam "Change x"
+  printf 'p\n' >"$cfg/dot_p"
+  run_envmgr diff
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "~/.x: changed both here and in the source since it was restored from $base"
+  assert_contains "$out" "Changed here:"
+  assert_contains "$out" "+++ ~/.x (here)"
+  assert_contains "$out" "+x-here"
+  assert_contains "$out" "Changed in the source:"
+  assert_contains "$out" "+x-source"
+  assert_contains "$out" "envmgr save --force ~/.x"
+  assert_contains "$out" "~/.p: changed in the source; envmgr restore config would apply this"
+  assert_contains "$out" "+p"
+
+  run_envmgr diff "$HOME/.p"
+  assert_eq "$rc" 0 "$out"
+  [[ "$out" != *"~/.x"* ]] || fail "diff ignored its targets"
+  run_envmgr diff "$HOME/.missing"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "is not managed"
+  run_envmgr diff --bogus
+  assert_eq "$rc" 2 "$out"
+}
+
+test_diff_without_history_compares_source_and_file() {
+  selected_mac
+  printf 'a\n' >"$cfg/dot_alpha"
+  run_envmgr restore config --yes
+  printf 'a-here\n' >"$HOME/.alpha"
+  printf 'a-source\n' >"$cfg/dot_alpha"
+  run_envmgr diff
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "~/.alpha: changed both here and in the source"
+  assert_contains "$out" "not in the data repository history"
+  assert_contains "$out" "-a-source"
+  assert_contains "$out" "+a-here"
 }
 
 test_save_keeps_encryption() {
@@ -482,6 +552,11 @@ test_save_keeps_encryption() {
   run_envmgr adopt config --encrypt "$HOME/.netrc"
   assert_eq "$rc" 0 "$out"
   printf 'new-secret\n' >"$HOME/.netrc"
+  run_envmgr diff
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "~/.netrc: changed here"
+  assert_contains "$out" "(encrypted; contents not shown)"
+  [[ "$out" != *secret* ]] || fail "diff printed the secret"
   run_envmgr save --yes
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "~/.netrc (encrypted; contents not shown)"
