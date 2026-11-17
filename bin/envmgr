@@ -43,8 +43,8 @@ source "$ENVMGR_ROOT/lib/envmgr/setup.sh"
 source "$ENVMGR_ROOT/lib/envmgr/evaluate.sh"
 # shellcheck source=lib/envmgr/migrate.sh
 source "$ENVMGR_ROOT/lib/envmgr/migrate.sh"
-# shellcheck source=lib/envmgr/save.sh
-source "$ENVMGR_ROOT/lib/envmgr/save.sh"
+# shellcheck source=lib/envmgr/publish.sh
+source "$ENVMGR_ROOT/lib/envmgr/publish.sh"
 
 envmgr_usage() {
   cat <<'EOF'
@@ -77,6 +77,8 @@ Commands:
       Move the data repository to a new, empty remote.
   migrate --follow <url> [--yes] [--dry-run]
       Switch this machine's data checkout to the migrated remote.
+  publish [-m <message>] [--no-push] [--yes] [--dry-run]
+      Commit this machine's changes in the data repository and push them.
   restore [--yes] [--dry-run]
       Restore packages, then config, then system units.
   restore config [target...] [--yes] [--dry-run]
@@ -85,8 +87,6 @@ Commands:
       Install missing packages and upgrade each provider.
   restore system [unit...] [--force] [--yes] [--dry-run]
       Apply system units that are out of sync, or all of them with --force.
-  save [-m <message>] [--no-push] [--yes] [--dry-run]
-      Commit this machine's changes in the data repository and push them.
   setup
       Install prerequisites, clone the data repository, and select a machine.
 
@@ -111,7 +111,7 @@ main() {
     drop) envmgr_cmd_drop "$@" ;;
     evaluate) envmgr_cmd_evaluate "$@" ;;
     migrate) envmgr_cmd_migrate "$@" ;;
-    save) envmgr_cmd_save "$@" ;;
+    publish) envmgr_cmd_publish "$@" ;;
     -h|--help|help) envmgr_usage ;;
     "")
       envmgr_usage >&2

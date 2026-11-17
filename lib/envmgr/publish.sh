@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# envmgr save: commit the active machine's directory in the data checkout and
-# push it to origin.
+# envmgr publish: commit the active machine's directory in the data checkout
+# and push it to origin.
 
-envmgr_git_save() {
-  git -C "$ENVMGR_SAVE_DATA" "$@"
+envmgr_git_publish() {
+  git -C "$ENVMGR_PUBLISH_DATA" "$@"
 }
 
 # Print the absolute path of a file in the data checkout's Git directory.
-envmgr_save_git_path() {
+envmgr_publish_git_path() {
   local path=""
 
-  path="$(envmgr_git_save rev-parse --git-path "$1")" || return 1
-  [[ "$path" == /* ]] || path="$ENVMGR_SAVE_DATA/$path"
+  path="$(envmgr_git_publish rev-parse --git-path "$1")" || return 1
+  [[ "$path" == /* ]] || path="$ENVMGR_PUBLISH_DATA/$path"
   printf '%s\n' "$path"
 }
 
@@ -38,7 +38,7 @@ envmgr_data_branch() {
 
 # Print the target name a Chezmoi source name stands for, such as .netrc for
 # encrypted_private_dot_netrc.age.
-envmgr_save_target_name() {
+envmgr_publish_target_name() {
   local name="$1"
 
   name="${name%.tmpl}"
@@ -64,7 +64,7 @@ envmgr_save_target_name() {
 # Refuse to commit config sources that look like plaintext secrets: a source
 # beside an encrypted source for the same target, a name adopt requires
 # --encrypt for, or a private key in the content.
-envmgr_save_check_secrets() {
+envmgr_publish_check_secrets() {
   local machine="$1"
   local file=""
   local base=""
@@ -78,18 +78,18 @@ envmgr_save_check_secrets() {
     case "$base" in
       modify_*|run_*|.chezmoi*) continue ;;
     esac
-    name="$(envmgr_save_target_name "$base")"
-    for sibling in "$ENVMGR_SAVE_DATA/$(dirname -- "$file")"/*; do
+    name="$(envmgr_publish_target_name "$base")"
+    for sibling in "$ENVMGR_PUBLISH_DATA/$(dirname -- "$file")"/*; do
       [[ -e "$sibling" ]] || continue
       case "$(basename -- "$sibling")" in
         encrypted_*|*.age) ;;
         *) continue ;;
       esac
-      [[ "$(envmgr_save_target_name "$(basename -- "$sibling")")" == "$name" ]] && \
-        envmgr_die 1 "$file is a plaintext copy of an encrypted target; remove it before saving"
+      [[ "$(envmgr_publish_target_name "$(basename -- "$sibling")")" == "$name" ]] && \
+        envmgr_die 1 "$file is a plaintext copy of an encrypted target; remove it before publishing"
     done
     if envmgr_looks_secret_name "$name" || \
-      grep -Eq -- '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----|AGE-SECRET-KEY-' "$ENVMGR_SAVE_DATA/$file" 2>/dev/null; then
+      grep -Eq -- '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----|AGE-SECRET-KEY-' "$ENVMGR_PUBLISH_DATA/$file" 2>/dev/null; then
       envmgr_die 1 "$file looks like a secret; adopt its target with --encrypt instead"
     fi
   done
@@ -97,7 +97,7 @@ envmgr_save_check_secrets() {
 
 # Summarize changed paths under the machine directory, one category per line,
 # for the default commit message.
-envmgr_save_summary() {
+envmgr_publish_summary() {
   local machine="$1"
 
   awk -v prefix="machines/$machine/" '
@@ -119,7 +119,7 @@ envmgr_save_summary() {
   '
 }
 
-envmgr_cmd_save() {
+envmgr_cmd_publish() {
   local message=""
   local push=true
   local assume_yes=false
@@ -149,7 +149,7 @@ envmgr_cmd_save() {
       --no-push) push=false ;;
       --yes|-y) assume_yes=true ;;
       --dry-run|-n) dry_run=true ;;
-      *) envmgr_usage_error "unknown argument for save: $1" ;;
+      *) envmgr_usage_error "unknown argument for publish: $1" ;;
     esac
     shift
   done
@@ -157,82 +157,82 @@ envmgr_cmd_save() {
   machine_dir="$(envmgr_active_machine_dir warn)"
   machine="$(basename -- "$machine_dir")"
   dir="machines/$machine"
-  ENVMGR_SAVE_DATA="$(dirname -- "$(dirname -- "$machine_dir")")"
-  [[ -e "$ENVMGR_SAVE_DATA/.git" ]] || \
-    envmgr_die 1 "the data repository is not a Git checkout: $ENVMGR_SAVE_DATA"
-  envmgr_git_save remote get-url origin >/dev/null 2>&1 || \
+  ENVMGR_PUBLISH_DATA="$(dirname -- "$(dirname -- "$machine_dir")")"
+  [[ -e "$ENVMGR_PUBLISH_DATA/.git" ]] || \
+    envmgr_die 1 "the data repository is not a Git checkout: $ENVMGR_PUBLISH_DATA"
+  envmgr_git_publish remote get-url origin >/dev/null 2>&1 || \
     envmgr_die 1 "the data repository has no origin remote"
 
-  branch="$(envmgr_data_branch "$ENVMGR_SAVE_DATA" "$machine_dir")"
-  current="$(envmgr_git_save branch --show-current)"
+  branch="$(envmgr_data_branch "$ENVMGR_PUBLISH_DATA" "$machine_dir")"
+  current="$(envmgr_git_publish branch --show-current)"
   [[ "$current" == "$branch" ]] || \
     envmgr_die 1 "the data checkout is on branch ${current:-(detached)}, expected $branch"
-  [[ ! -e "$(envmgr_save_git_path rebase-merge)" && \
-    ! -e "$(envmgr_save_git_path rebase-apply)" && \
-    ! -e "$(envmgr_save_git_path MERGE_HEAD)" ]] || \
+  [[ ! -e "$(envmgr_publish_git_path rebase-merge)" && \
+    ! -e "$(envmgr_publish_git_path rebase-apply)" && \
+    ! -e "$(envmgr_publish_git_path MERGE_HEAD)" ]] || \
     envmgr_die 1 "the data checkout has a rebase or merge in progress; finish it first"
 
-  if ! envmgr_git_save fetch --quiet origin "$branch"; then
+  if ! envmgr_git_publish fetch --quiet origin "$branch"; then
     [[ "$push" == false ]] || envmgr_die 1 "could not fetch origin"
     envmgr_warn "could not fetch origin; comparing against its last known state"
   fi
-  if envmgr_git_save rev-parse --verify --quiet "origin/$branch" >/dev/null; then
-    ahead="$(envmgr_git_save rev-list --count "origin/$branch..HEAD")" || return 1
-    behind="$(envmgr_git_save rev-list --count "HEAD..origin/$branch")" || return 1
-  elif envmgr_git_save rev-parse --verify --quiet HEAD >/dev/null; then
-    ahead="$(envmgr_git_save rev-list --count HEAD)" || return 1
+  if envmgr_git_publish rev-parse --verify --quiet "origin/$branch" >/dev/null; then
+    ahead="$(envmgr_git_publish rev-list --count "origin/$branch..HEAD")" || return 1
+    behind="$(envmgr_git_publish rev-list --count "HEAD..origin/$branch")" || return 1
+  elif envmgr_git_publish rev-parse --verify --quiet HEAD >/dev/null; then
+    ahead="$(envmgr_git_publish rev-list --count HEAD)" || return 1
   fi
 
   # Stage into a scratch copy of the index, so the preview and the checks see
   # new, changed, and deleted files exactly as the commit will.
   index="$(mktemp "${TMPDIR:-/tmp}/envmgr-index.XXXXXX")"
-  if [[ -f "$(envmgr_save_git_path index)" ]]; then
-    cp -- "$(envmgr_save_git_path index)" "$index"
+  if [[ -f "$(envmgr_publish_git_path index)" ]]; then
+    cp -- "$(envmgr_publish_git_path index)" "$index"
   else
     rm -f -- "$index"
   fi
-  if GIT_INDEX_FILE="$index" envmgr_git_save add -A -- "$dir"; then
-    changed="$(GIT_INDEX_FILE="$index" envmgr_git_save diff --cached --name-only -- "$dir")"
-    added="$(GIT_INDEX_FILE="$index" envmgr_git_save diff --cached --name-only --diff-filter=d -- "$dir")"
+  if GIT_INDEX_FILE="$index" envmgr_git_publish add -A -- "$dir"; then
+    changed="$(GIT_INDEX_FILE="$index" envmgr_git_publish diff --cached --name-only -- "$dir")"
+    added="$(GIT_INDEX_FILE="$index" envmgr_git_publish diff --cached --name-only --diff-filter=d -- "$dir")"
     preview="$(
-      GIT_INDEX_FILE="$index" envmgr_git_save -c color.status=never status --short -- "$dir"
-      GIT_INDEX_FILE="$index" envmgr_git_save diff --cached --stat -- "$dir"
+      GIT_INDEX_FILE="$index" envmgr_git_publish -c color.status=never status --short -- "$dir"
+      GIT_INDEX_FILE="$index" envmgr_git_publish diff --cached --stat -- "$dir"
     )"
   else
     rc=1
   fi
   rm -f -- "$index"
   [[ "$rc" -eq 0 ]] || return 1
-  others="$(envmgr_git_save status --porcelain -- . ":(exclude)$dir")"
+  others="$(envmgr_git_publish status --porcelain -- . ":(exclude)$dir")"
 
   if [[ -z "$changed" && ( "$push" == false || "$ahead" -eq 0 ) ]]; then
-    [[ -z "$others" ]] || envmgr_warn "changes outside $dir are not saved; commit them with git"
-    printf 'save: nothing to save for %s\n' "$machine"
+    [[ -z "$others" ]] || envmgr_warn "changes outside $dir are not published; commit them with git"
+    printf 'publish: nothing to publish for %s\n' "$machine"
     return 0
   fi
 
-  printf '%s\n' "$added" | envmgr_save_check_secrets "$machine"
+  printf '%s\n' "$added" | envmgr_publish_check_secrets "$machine"
   if [[ "$push" == true && "$behind" -gt 0 ]]; then
-    outside="$(envmgr_git_save log --name-only --format= "origin/$branch..HEAD" | \
+    outside="$(envmgr_git_publish log --name-only --format= "origin/$branch..HEAD" | \
       grep -v "^$dir/" | grep -v '^$' || true)"
     [[ -z "$outside" ]] || \
       envmgr_die 1 "origin has $behind new commit(s), and local commits change files outside $dir; pull and resolve with git"
-    [[ -z "$(envmgr_git_save status --porcelain --untracked-files=no -- . ":(exclude)$dir")" ]] || \
+    [[ -z "$(envmgr_git_publish status --porcelain --untracked-files=no -- . ":(exclude)$dir")" ]] || \
       envmgr_die 1 "origin has $behind new commit(s), and uncommitted changes outside $dir would block pulling them; commit or stash them, or rerun with --no-push"
   fi
   [[ -n "$message" ]] || message="$(
     printf 'Update %s\n\n' "$machine"
-    printf '%s\n' "$changed" | envmgr_save_summary "$machine"
+    printf '%s\n' "$changed" | envmgr_publish_summary "$machine"
   )"
 
-  printf 'save: %s in %s\n' "$dir" "$(envmgr_display_path "$ENVMGR_SAVE_DATA")"
+  printf 'publish: %s in %s\n' "$dir" "$(envmgr_display_path "$ENVMGR_PUBLISH_DATA")"
   if [[ -n "$changed" ]]; then
     printf '%s\n' "$preview" | sed 's/^/  /'
     printf 'Commit message:\n'
     printf '%s\n' "$message" | sed 's/^/  /'
   fi
   if [[ -n "$others" ]]; then
-    envmgr_warn "these changes outside $dir are not saved:"
+    envmgr_warn "these changes outside $dir are not published:"
     printf '%s\n' "$others" | sed 's/^/  /' >&2
   fi
   if [[ "$push" == true ]]; then
@@ -241,29 +241,29 @@ envmgr_cmd_save() {
     printf 'Then push to origin/%s.\n' "$branch"
   fi
   [[ "$dry_run" == true ]] && return 0
-  envmgr_confirm "Save these changes?" "$assume_yes" || {
-    printf 'save: cancelled\n'
+  envmgr_confirm "Publish these changes?" "$assume_yes" || {
+    printf 'publish: cancelled\n'
     return 1
   }
 
   if [[ -n "$changed" ]]; then
-    envmgr_git_save add -A -- "$dir" || return 1
+    envmgr_git_publish add -A -- "$dir" || return 1
     # The pathspec commits only this machine's directory and leaves anything
     # else staged as it was.
-    envmgr_git_save commit --quiet -m "$message" -- "$dir" || \
-      envmgr_die 1 "git commit failed; the changes are staged in $(envmgr_display_path "$ENVMGR_SAVE_DATA")"
-    printf 'save: committed %s\n' "$(envmgr_git_save rev-parse --short HEAD)"
+    envmgr_git_publish commit --quiet -m "$message" -- "$dir" || \
+      envmgr_die 1 "git commit failed; the changes are staged in $(envmgr_display_path "$ENVMGR_PUBLISH_DATA")"
+    printf 'publish: committed %s\n' "$(envmgr_git_publish rev-parse --short HEAD)"
   fi
   [[ "$push" == true ]] || return 0
 
   if [[ "$behind" -gt 0 ]]; then
-    envmgr_git_save rebase --quiet "origin/$branch" >/dev/null 2>&1 || rc=$?
+    envmgr_git_publish rebase --quiet "origin/$branch" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -ne 0 ]]; then
-      envmgr_git_save rebase --abort >/dev/null 2>&1 || true
-      envmgr_die 1 "origin's new commits conflict with this machine's; the commit is local only. Rebase onto origin/$branch with git, then run envmgr save again"
+      envmgr_git_publish rebase --abort >/dev/null 2>&1 || true
+      envmgr_die 1 "origin's new commits conflict with this machine's; the commit is local only. Rebase onto origin/$branch with git, then run envmgr publish again"
     fi
   fi
-  envmgr_git_save push --quiet origin "HEAD:refs/heads/$branch" || \
-    envmgr_die 1 "push failed; the commit is local only. Run envmgr save again to retry"
-  printf 'save: pushed to origin/%s\n' "$branch"
+  envmgr_git_publish push --quiet origin "HEAD:refs/heads/$branch" || \
+    envmgr_die 1 "push failed; the commit is local only. Run envmgr publish again to retry"
+  printf 'publish: pushed to origin/%s\n' "$branch"
 }

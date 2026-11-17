@@ -88,7 +88,7 @@ description=Mac mini, primary desk machine
 
 - `os` and `distribution` are required. Commands that change the system
   (`restore`, `adopt`, `drop`), and `init`, refuse to run when they do not
-  match the running system. `check`, `list`, `evaluate`, and `save` warn and
+  match the running system. `check`, `list`, `evaluate`, and `publish` warn and
   continue.
 - A mismatch in the optional `architecture` field produces a warning.
 - Hardware is not a dimension. Hardware-specific settings live in the files
@@ -108,7 +108,7 @@ envmgr drop    config|package ...
 envmgr evaluate [config|package|system] [--offline]
 envmgr evaluate --from <id> [target...] [--offline]
 envmgr migrate [--no-history] <url> | migrate --follow <url>
-envmgr save [-m <message>] [--no-push]
+envmgr publish [-m <message>] [--no-push]
 ```
 
 `envmgr --help` lists every form with its options and a one-line summary.
@@ -125,10 +125,10 @@ envmgr save [-m <message>] [--no-push]
   and exits. Without `--yes`, confirmation needs a terminal.
 - Exit codes: `0` success or in sync; `1` error; `2` usage error; `3` check
   found drift; `75` reboot or re-login required before continuing.
-- Envmgr commits only in `save`, and only the active machine's directory.
-  It pushes only in `save` and `migrate`, and pulls only through the `git`
+- Envmgr commits only in `publish`, and only the active machine's directory.
+  It pushes only in `publish` and `migrate`, and pulls only through the `git`
   provider and `evaluate --from` (fast-forward only, clean checkouts only)
-  and the rebase in `save`.
+  and the rebase in `publish`.
 - Envmgr is written in Bash and must run under Bash 3.2, because
   `envmgr setup` runs from `/bin/bash` on a fresh Mac before Homebrew exists.
   No associative arrays, `mapfile`, `${var,,}`, or other Bash 4+ features.
@@ -208,11 +208,11 @@ complete:
    restore keeps it installed and upgraded. A tool the system provides (Git
    from the Command Line Tools or the Fedora image) is left undeclared and
    updated with the system.
-8. **Save.** When the selected machine's directory has uncommitted changes
+8. **Publish.** When the selected machine's directory has uncommitted changes
    (for example, a machine created in step 4, or a tool declared in step
-   7), offer to run `envmgr save`,
+   7), offer to run `envmgr publish`,
    so the machine is on `origin` before anything long-running. A failed
-   save warns and setup continues.
+   publish warns and setup continues.
 9. **Restore.** Offer to run `envmgr restore`, which previews and confirms
    each phase as usual; inside setup, its confirmations read the same input
    as setup's questions. When restore exits `75`, setup asks for a reboot or
@@ -223,7 +223,7 @@ complete:
 10. **Manual steps.** Print the machine's `POSTINSTALL.md`, if present: the
    steps envmgr cannot automate, such as App Store sign-in or privacy grants.
 
-Yes/no questions whose usual answer is yes (save, restore) default to yes.
+Yes/no questions whose usual answer is yes (publish, restore) default to yes.
 
 #### `envmgr init`
 
@@ -281,9 +281,9 @@ When `origin` already is `<url>`, `migrate` only records `data_url=`.
 
 The old remote is never deleted.
 
-#### `envmgr save`
+#### `envmgr publish`
 
-`save` commits the active machine's directory, `machines/<id>/`, in the data
+`publish` commits the active machine's directory, `machines/<id>/`, in the data
 checkout and pushes it, so other machines can pull it with `restore`:
 
 1. Refuse unless the checkout is on the branch the machine's `git` provider
@@ -308,11 +308,11 @@ checkout and pushes it, so other machines can pull it with `restore`:
 6. Rebase onto `origin/<branch>` when it has new commits (machines edit
    separate directories, so this normally applies cleanly), then push. When
    the rebase conflicts, envmgr aborts it and exits `1`, leaving the commit
-   local; the same happens when the push fails. Running `save` again with
+   local; the same happens when the push fails. Running `publish` again with
    nothing new to commit pushes earlier unpushed commits.
 
 `--no-push` commits only, without fetching first if the network is down.
-With nothing to commit and nothing to push, `save` prints so and exits `0`.
+With nothing to commit and nothing to push, `publish` prints so and exits `0`.
 
 ## Configuration
 
@@ -518,7 +518,7 @@ Without an `agent=` setting, or when its command is not on `PATH`,
 configuration from another machine to the selected one. (When none of the
 targets exist here yet, `adopt config --from` copies them without an
 agent.) Run it on the machine that receives the files, so the agent can
-look at the targets that already exist there and `envmgr save` commits
+look at the targets that already exist there and `envmgr publish` commits
 the right directory afterward.
 
 1. Unless `--offline` is given, fetch the data checkout and fast-forward it
@@ -544,7 +544,7 @@ the right directory afterward.
    like secrets), proposes deleting an only-here target only when asked, and
    never restores or commits. It ends by pointing the user to
    `envmgr restore config --dry-run`, `envmgr restore config`, and
-   `envmgr save`.
+   `envmgr publish`.
 
 ## Secrets
 
@@ -602,9 +602,9 @@ the right directory afterward.
 | 16 | `migrate` pushes `origin`'s branches and tags instead of `--mirror` | 2026-11-14 |
 | 17 | One age key per user, created by the first `adopt config --encrypt` and copied by hand or pasted into setup, which checks it decrypts the machine's files; setup never generates one | 2026-11-14 |
 | 18 | `migrate --no-history` pushes one root commit; checkouts that cannot follow are renamed and re-cloned, never deleted | 2026-11-14 |
-| 19 | `save` commits only the active machine's directory and pushes it, rebasing onto `origin` when the local commits stay inside that directory; envmgr otherwise never commits | 2026-11-14 |
+| 19 | `publish` commits only the active machine's directory and pushes it, rebasing onto `origin` when the local commits stay inside that directory; envmgr otherwise never commits | 2026-11-14 |
 | 20 | Copying configuration between machines that needs judgement (existing targets, merges) goes through `evaluate --from`, run on the receiving machine, with a deterministic comparison in the prompt | 2026-11-14 |
 | 21 | `adopt config --from` copies sources only for targets that do not exist on this machine; anything else is sent to `evaluate --from` | 2026-11-14 |
 | 22 | A new machine starts from one OS-neutral command, `install.sh` piped from GitHub, which only makes Git usable, clones the tool, and starts `setup`; a machine is based on an existing machine with the same `os` and `distribution`, or starts empty | 2026-11-14 |
-| 23 | `setup` carries on through `save` and `restore`, so the one command leaves the machine configured; after a reboot or error, rerunning `setup` resumes | 2026-11-14 |
+| 23 | `setup` carries on through `publish` and `restore`, so the one command leaves the machine configured; after a reboot or error, rerunning `setup` resumes | 2026-11-14 |
 | 24 | envmgr's own dependencies are declared like any other package: `setup` adopts `git` and `chezmoi` with the provider that installed them, unless the system provides them, and an empty machine starts with the tool and data checkouts in `git/repos` | 2026-11-15 |

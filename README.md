@@ -9,8 +9,8 @@ it. See [DESIGN.md](DESIGN.md) for the full specification.
 
 **Status:** ready for testing. Every command in DESIGN.md is implemented:
 `setup`, `init`, `check`, `list`, `restore`, `adopt` (including
-`--encrypt`), `drop`, `evaluate`, `migrate`, `save`, system units, and the `git`,
-`homebrew`, `omarchy`, `flatpak`, and `rpm-ostree` providers.
+`--encrypt`), `drop`, `evaluate`, `migrate`, `publish`, system units, and
+the `git`, `homebrew`, `omarchy`, `flatpak`, and `rpm-ostree` providers.
 
 ## Requirements
 
@@ -57,7 +57,7 @@ steps. It:
 7. Declares Git and Chezmoi in the machine's Homebrew or Omarchy packages
    if they were installed that way and aren't declared yet, so
    `envmgr restore` keeps them upgraded.
-8. Offers to commit and push a new or changed machine with `envmgr save`.
+8. Offers to commit and push a new or changed machine with `envmgr publish`.
 9. Offers to run `envmgr restore`, which previews and confirms packages, then
    config, then system units.
 10. Prints the machine's `POSTINSTALL.md`, if it has one: manual steps such as
@@ -96,7 +96,7 @@ envmgr list [config|package|system]    # list what this machine manages
 envmgr migrate <url>                   # move envmgr-data to an empty remote
 envmgr migrate --no-history <url>      # or move a copy of its current files
 envmgr migrate --follow <url>          # then, on every other machine
-envmgr save                            # commit this machine's changes, push
+envmgr publish                         # commit this machine's changes, push
 ```
 
 The first `--encrypt` creates `~/.config/envmgr/age.key`. Back it up (a

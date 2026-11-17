@@ -178,7 +178,7 @@ Boundaries:
   this repository, or commit or push.
 - When you are done, summarize the changes and tell the user to run
   envmgr restore config --dry-run, then envmgr restore config, then
-  envmgr save.
+  envmgr publish.
 EOF
 }
 

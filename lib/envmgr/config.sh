@@ -449,7 +449,7 @@ envmgr_adopt_config_from() {
   if [[ "$encrypted" == true && ! -f "$(envmgr_age_key_file)" ]]; then
     envmgr_warn "encrypted files need ~/.config/envmgr/age.key; copy it from another machine"
   fi
-  printf 'Adopted from %s. Run envmgr restore config --dry-run, then envmgr restore config, then envmgr save.\n' "$from"
+  printf 'Adopted from %s. Run envmgr restore config --dry-run, then envmgr restore config, then envmgr publish.\n' "$from"
 }
 
 envmgr_drop_config() {
