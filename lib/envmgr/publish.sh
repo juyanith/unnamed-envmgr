@@ -135,6 +135,7 @@ envmgr_cmd_publish() {
   local preview=""
   local others=""
   local outside=""
+  local unsaved=0
   local ahead=0
   local behind=0
   local rc=0
@@ -204,6 +205,11 @@ envmgr_cmd_publish() {
   rm -f -- "$index"
   [[ "$rc" -eq 0 ]] || return 1
   others="$(envmgr_git_publish status --porcelain -- . ":(exclude)$dir")"
+  # Edits under ~ reach the source only through envmgr save. Missing Chezmoi
+  # or age key only skips this reminder.
+  unsaved="$(envmgr_config_local_count "$machine_dir" 2>/dev/null)" || unsaved=0
+  [[ "${unsaved:-0}" -eq 0 ]] || \
+    envmgr_warn "$unsaved config target(s) have local edits that are not saved; run envmgr save first to include them"
 
   if [[ -z "$changed" && ( "$push" == false || "$ahead" -eq 0 ) ]]; then
     [[ -z "$others" ]] || envmgr_warn "changes outside $dir are not published; commit them with git"

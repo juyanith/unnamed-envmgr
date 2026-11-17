@@ -382,6 +382,119 @@ test_adopt_refuses_partially_managed_target() {
   assert_contains "$out" "partially managed"
 }
 
+test_adopt_refuses_managed_file_and_adds_new_files_in_directory() {
+  selected_mac
+  mkdir -p "$HOME/.config/tool"
+  printf 'a\n' >"$HOME/.config/tool/a.conf"
+  run_envmgr adopt config "$HOME/.config/tool"
+  assert_eq "$rc" 0 "$out"
+
+  printf 'a2\n' >"$HOME/.config/tool/a.conf"
+  run_envmgr adopt config "$HOME/.config/tool/a.conf"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "already managed; keep local edits with envmgr save"
+  run_envmgr adopt config "$HOME/.config/tool"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Nothing new to adopt in ~/.config/tool"
+  run_envmgr adopt config --exact "$HOME/.config/tool"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "only when a directory is first adopted"
+
+  # Only the new file is added; the edited one keeps its source.
+  mkdir -p "$HOME/.config/tool/sub"
+  printf 'b\n' >"$HOME/.config/tool/sub/b.conf"
+  run_envmgr adopt config "$HOME/.config/tool"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Adopted ~/.config/tool/sub/b.conf"
+  [[ "$out" != *"Adopted ~/.config/tool/a.conf"* ]] || fail "re-adopted a managed file"
+  assert_eq "$(cat "$cfg/dot_config/tool/sub/b.conf")" b
+  assert_eq "$(cat "$cfg/dot_config/tool/a.conf")" a
+}
+
+test_save_copies_local_edits() {
+  selected_mac
+  printf 'a\n' >"$cfg/dot_alpha"
+  printf 'b\n' >"$cfg/dot_beta"
+  printf 'c\n' >"$cfg/dot_gamma"
+  printf 'd\n' >"$cfg/dot_delta"
+  printf 'e\n' >"$cfg/dot_eps"
+  printf '{{ "t" }}\n' >"$cfg/dot_tmpl.tmpl"
+  printf '.alpha' >"$cfg/symlink_dot_link"
+  run_envmgr restore config --yes
+  assert_eq "$rc" 0 "$out"
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "save: nothing to save"
+
+  printf 'a2\n' >"$HOME/.alpha"
+  printf 'b-source\n' >"$cfg/dot_beta"
+  printf 'c2\n' >"$HOME/.gamma"
+  printf 'c-source\n' >"$cfg/dot_gamma"
+  rm "$HOME/.delta"
+  printf 'e2\n' >"$HOME/.eps"
+  printf 't2\n' >"$HOME/.tmpl"
+  rm "$HOME/.link"
+  ln -s .eps "$HOME/.link"
+
+  run_envmgr check config
+  assert_eq "$rc" 3 "$out"
+  assert_contains "$out" "Keep local changes with envmgr save"
+  run_envmgr save "$HOME/.missing"
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "is not managed; start managing it with envmgr adopt config"
+
+  run_envmgr save --dry-run
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "save: 3 target(s) will be saved"
+  assert_contains "$out" "+a2"
+  assert_contains "$out" "not saving ~/.gamma: changed both here and in the source"
+  assert_contains "$out" "not saving ~/.delta: deleted here"
+  assert_contains "$out" "not saving ~/.tmpl: a template"
+  [[ "$out" != *"~/.beta"* ]] || fail "offered to save a source-only change"
+  assert_eq "$(cat "$cfg/dot_alpha")" a "dry run saved"
+  run_envmgr save
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "rerun with --yes"
+
+  # Named targets limit the save.
+  run_envmgr save --yes "$HOME/.eps"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "saved 1 target(s). Run envmgr publish"
+  assert_eq "$(cat "$cfg/dot_eps")" e2
+  assert_eq "$(cat "$cfg/dot_alpha")" a
+
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "saved 2 target(s)"
+  assert_eq "$(cat "$cfg/dot_alpha")" a2
+  assert_eq "$(cat "$cfg/symlink_dot_link")" .eps
+  assert_eq "$(cat "$cfg/dot_beta")" b-source
+  assert_eq "$(cat "$cfg/dot_gamma")" c-source
+  assert_eq "$(cat "$cfg/dot_tmpl.tmpl")" '{{ "t" }}'
+  [[ -f "$cfg/dot_delta" ]] || fail "deleted target's source removed"
+  run_envmgr save --bogus
+  assert_eq "$rc" 2 "$out"
+}
+
+test_save_keeps_encryption() {
+  selected_mac
+  printf 'very-secret\n' >"$HOME/.netrc"
+  run_envmgr adopt config --encrypt "$HOME/.netrc"
+  assert_eq "$rc" 0 "$out"
+  printf 'new-secret\n' >"$HOME/.netrc"
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "~/.netrc (encrypted; contents not shown)"
+  [[ "$out" != *new-secret* ]] || fail "printed the secret"
+  local source=""
+  source="$(find "$cfg" -name 'encrypted_*')"
+  [[ -n "$source" ]] || fail "no encrypted source"
+  ! grep -q new-secret "$source" || fail "source holds plaintext"
+  assert_eq "$(cz mac decrypt "$source")" new-secret
+  run_envmgr check config
+  assert_eq "$rc" 0 "$out"
+}
+
 test_drop_keeps_local_copy() {
   selected_mac
   printf 'a\n' >"$cfg/dot_alpha"
@@ -1638,7 +1751,10 @@ test_publish_commits_and_pushes() {
   assert_contains "$(git -C "$data" status --porcelain)" "?? machines/other/"
 
   printf 'b\n' >"$HOME/.config/example/a.toml"
-  run_envmgr adopt config "$HOME/.config/example/a.toml"
+  run_envmgr publish --dry-run
+  assert_contains "$out" "1 config target(s) have local edits that are not saved"
+  run_envmgr save --yes
+  assert_eq "$rc" 0 "$out"
   run_envmgr publish --no-push -m "Tweak example" --yes
   assert_eq "$rc" 0 "$out"
   assert_eq "$(git -C "$data" log -1 --format=%s)" "Tweak example"

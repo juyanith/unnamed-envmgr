@@ -53,6 +53,7 @@ usage: envmgr <command> [arguments]
 Commands:
   adopt config [--exact] [--encrypt] <target...>
       Start managing files or directories in your home directory.
+      For a managed directory, adds only the files not managed yet.
   adopt config --from <machine-id> <target...>
       Copy config from another machine; the targets must not exist here.
   adopt package <provider> <package...>
@@ -87,6 +88,8 @@ Commands:
       Install missing packages and upgrade each provider.
   restore system [unit...] [--force] [--yes] [--dry-run]
       Apply system units that are out of sync, or all of them with --force.
+  save [target...] [--yes] [--dry-run]
+      Copy local edits to managed config files into this machine's source.
   setup
       Install prerequisites, clone the data repository, and select a machine.
 
@@ -112,6 +115,7 @@ main() {
     evaluate) envmgr_cmd_evaluate "$@" ;;
     migrate) envmgr_cmd_migrate "$@" ;;
     publish) envmgr_cmd_publish "$@" ;;
+    save) envmgr_cmd_save "$@" ;;
     -h|--help|help) envmgr_usage ;;
     "")
       envmgr_usage >&2

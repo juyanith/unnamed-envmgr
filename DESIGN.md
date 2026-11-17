@@ -86,10 +86,10 @@ architecture=apple-silicon
 description=Mac mini, primary desk machine
 ```
 
-- `os` and `distribution` are required. Commands that change the system
-  (`restore`, `adopt`, `drop`), and `init`, refuse to run when they do not
-  match the running system. `check`, `list`, `evaluate`, and `publish` warn and
-  continue.
+- `os` and `distribution` are required. Commands that change the system or
+  copy from it (`restore`, `adopt`, `drop`, `save`), and `init`, refuse to
+  run when they do not match the running system. `check`, `list`,
+  `evaluate`, and `publish` warn and continue.
 - A mismatch in the optional `architecture` field produces a warning.
 - Hardware is not a dimension. Hardware-specific settings live in the files
   of the machines that need them.
@@ -108,6 +108,7 @@ envmgr drop    config|package ...
 envmgr evaluate [config|package|system] [--offline]
 envmgr evaluate --from <id> [target...] [--offline]
 envmgr migrate [--no-history] <url> | migrate --follow <url>
+envmgr save    [target...]
 envmgr publish [-m <message>] [--no-push]
 ```
 
@@ -284,7 +285,9 @@ The old remote is never deleted.
 #### `envmgr publish`
 
 `publish` commits the active machine's directory, `machines/<id>/`, in the data
-checkout and pushes it, so other machines can pull it with `restore`:
+checkout and pushes it, so other machines can pull it with `restore`. Edits
+made under `$HOME` reach it only after `envmgr save`; when config targets
+have local changes, `publish` warns and continues.
 
 1. Refuse unless the checkout is on the branch the machine's `git` provider
    entry for the data checkout tracks (`main` when there is none), has an
@@ -336,7 +339,8 @@ Commands:
 
 - **`check config`** reads `chezmoi status`. Column one (last written state
   versus actual) is reported as **local changes**; column two (actual versus
-  source) as **pending restore**. Both count as drift.
+  source) as **pending restore**. Both count as drift. When there are local
+  changes, it adds a line pointing to `save` and `restore config`.
 - **`list config`** prints targets and their kind: file, directory, symlink,
   `modify`, or encrypted.
 - **`restore config [target...]`** previews the diff, then confirms and
@@ -349,8 +353,28 @@ Commands:
   it; later files are not managed until adopted. `--exact` warns that
   unmanaged files will be deleted on restore. Partial ownership is authored
   as a `modify_` source, not adopted; adopting a target that a `modify_`
-  source manages is refused. Adopting a target that is already managed
-  replaces its source with the current file.
+  source manages is refused. A managed file or symlink is refused with a
+  pointer to `save`. For a managed directory, only the files and symlinks
+  inside it that are not managed yet are added; `--exact` is refused there,
+  because it applies when a directory is first adopted.
+- **`save [target...]`** copies local edits back into the source: the
+  reverse of `restore config`. Without targets it covers every target with
+  a local change (column one of `chezmoi status`); targets limit it to those
+  at or under them, and each must be managed (otherwise it points to
+  `adopt config`). It previews the diff from source to the current file
+  (encrypted targets are listed by name only), confirms, and runs
+  `chezmoi re-add`, which keeps each source's name, so encryption and
+  attributes carry over; symlinks are updated with `chezmoi add`. It skips,
+  with a warning and reason, any target that:
+  - changed in the source too since Chezmoi last wrote it (the source's
+    content no longer matches the hash in Chezmoi's persistent state, for
+    example after a pull), because saving would discard that change;
+  - is a template or `modify_` source, which must be edited in the source;
+  - was deleted, or changed type (file to symlink or back).
+
+  A target whose source alone changed is a pending restore, not a local
+  change, and is never saved. `save` does not commit; it ends by pointing
+  to `envmgr publish`.
 - **`adopt config --from <id> target...`** copies the sources that machine
   `<id>` has for the targets (every managed file at or under each one) into
   this machine's `config/`, with their names unchanged, so attributes carry
@@ -506,10 +530,12 @@ with the agent's exit code. The prompt contains:
 - the machine ID and the paths to `machine.conf`, `SPEC.md`,
   `POSTINSTALL.md`, the data repository's `AGENTS.md`, and this `DESIGN.md`;
 - current `check` output for the selected categories, as paths and statuses,
-  never file contents;
+  never file contents, and that local config changes are kept with
+  `envmgr save` or discarded with `envmgr restore config`;
 - the approval boundary: the agent may edit `machines/<id>/` and repository
   documentation. It must not run `envmgr restore`, install packages, or
-  commit.
+  commit, and it ends by pointing the user to `envmgr restore` and
+  `envmgr publish`.
 
 Without an `agent=` setting, or when its command is not on `PATH`,
 `evaluate` exits `1` with instructions.
@@ -608,3 +634,4 @@ the right directory afterward.
 | 22 | A new machine starts from one OS-neutral command, `install.sh` piped from GitHub, which only makes Git usable, clones the tool, and starts `setup`; a machine is based on an existing machine with the same `os` and `distribution`, or starts empty | 2026-11-14 |
 | 23 | `setup` carries on through `publish` and `restore`, so the one command leaves the machine configured; after a reboot or error, rerunning `setup` resumes | 2026-11-14 |
 | 24 | envmgr's own dependencies are declared like any other package: `setup` adopts `git` and `chezmoi` with the provider that installed them, unless the system provides them, and an empty machine starts with the tool and data checkouts in `git/repos` | 2026-11-15 |
+| 25 | Local edits reach the source through `save` (only targets whose source is unchanged since Chezmoi last wrote them); committing and pushing is `publish`, formerly `save`; `adopt` only starts managing targets | 2026-11-17 |

@@ -162,6 +162,14 @@ envmgr_display_path() {
   esac
 }
 
+envmgr_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{ print $1 }'
+  else
+    shasum -a 256 | awk '{ print $1 }'
+  fi
+}
+
 envmgr_timestamp() {
   date -u +%Y%m%dT%H%M%SZ
 }
