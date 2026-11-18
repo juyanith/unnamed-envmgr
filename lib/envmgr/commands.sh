@@ -8,6 +8,17 @@ envmgr_parse_category() {
   esac
 }
 
+# diff and save cover only config, so like the other config commands they
+# take "config" as an optional first argument. Returns 0 when $1 names it;
+# another category is a usage error.
+envmgr_config_category_arg() {
+  case "$1" in
+    config) return 0 ;;
+    package|system) envmgr_usage_error "$2 applies only to config" ;;
+  esac
+  return 1
+}
+
 envmgr_cmd_init() {
   local data=""
   local new=false
@@ -360,13 +371,21 @@ envmgr_cmd_drop() {
 }
 
 envmgr_cmd_diff() {
+  local category=false
   local machine_dir=""
   local targets=()
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -*) envmgr_usage_error "unknown option for diff: $1" ;;
-      *) targets+=("$(envmgr_absolute_target "$1")") ;;
+      *)
+        if [[ "$category" == false && ${#targets[@]} -eq 0 ]] && \
+          envmgr_config_category_arg "$1" diff; then
+          category=true
+        else
+          targets+=("$(envmgr_absolute_target "$1")")
+        fi
+        ;;
     esac
     shift
   done
@@ -379,6 +398,7 @@ envmgr_cmd_save() {
   local assume_yes=false
   local dry_run=false
   local force=false
+  local category=false
   local machine_dir=""
   local targets=()
   local rc=0
@@ -389,7 +409,14 @@ envmgr_cmd_save() {
       --dry-run|-n) dry_run=true ;;
       --force) force=true ;;
       -*) envmgr_usage_error "unknown option for save: $1" ;;
-      *) targets+=("$(envmgr_absolute_target "$1")") ;;
+      *)
+        if [[ "$category" == false && ${#targets[@]} -eq 0 ]] && \
+          envmgr_config_category_arg "$1" save; then
+          category=true
+        else
+          targets+=("$(envmgr_absolute_target "$1")")
+        fi
+        ;;
     esac
     shift
   done

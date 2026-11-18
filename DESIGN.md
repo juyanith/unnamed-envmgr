@@ -108,8 +108,8 @@ envmgr drop    config|package ...
 envmgr evaluate [config|package|system] [--offline]
 envmgr evaluate --from <id> [target...] [--offline]
 envmgr migrate [--no-history] <url> | migrate --follow <url>
-envmgr diff    [target...]
-envmgr save    [--force] [target...]
+envmgr diff    [config] [target...]
+envmgr save    [config] [--force] [target...]
 envmgr publish [-m <message>] [--no-push]
 ```
 
@@ -342,7 +342,7 @@ Commands:
   versus actual) is reported as **local changes**; column two (actual versus
   source) as **pending restore**. Both count as drift. When there are local
   changes, it adds a line pointing to `diff`, `save`, and `restore config`.
-- **`diff [target...]`** is read-only and shows each changed target:
+- **`diff [config] [target...]`** is read-only and shows each changed target:
   - a local change, as the diff from source to file (what `save` records);
   - a pending restore, as the diff from file to source (what `restore config`
     writes);
@@ -356,6 +356,11 @@ Commands:
 
   Encrypted targets are listed without their contents. Targets limit the
   output to those at or under them; each must be managed.
+
+  `diff` and `save` cover only config. Like the other config commands, they
+  take `config` as an optional first argument, so `save config <target>`
+  works; a target named `config` in the current directory is then given as
+  `./config`, as for `restore config`.
 - **`list config`** prints targets and their kind: file, directory, symlink,
   `modify`, or encrypted.
 - **`restore config [target...]`** previews the diff, then confirms and
@@ -372,7 +377,7 @@ Commands:
   pointer to `save`. For a managed directory, only the files and symlinks
   inside it that are not managed yet are added; `--exact` is refused there,
   because it applies when a directory is first adopted.
-- **`save [target...]`** copies local edits back into the source: the
+- **`save [config] [target...]`** copies local edits back into the source: the
   reverse of `restore config`. Without targets it covers every target with
   a local change (column one of `chezmoi status`); targets limit it to those
   at or under them, and each must be managed (otherwise it points to
@@ -655,3 +660,4 @@ the right directory afterward.
 | 24 | envmgr's own dependencies are declared like any other package: `setup` adopts `git` and `chezmoi` with the provider that installed them, unless the system provides them, and an empty machine starts with the tool and data checkouts in `git/repos` | 2026-11-15 |
 | 25 | Local edits reach the source through `save` (only targets whose source is unchanged since Chezmoi last wrote them); committing and pushing is `publish`, formerly `save`; `adopt` only starts managing targets | 2026-11-17 |
 | 26 | `diff` shows a target changed on both sides as each side's change from the version Chezmoi last wrote, found in the data repository's history by hash; envmgr does not merge, and `save --force` keeps this machine's version only for named targets | 2026-11-17 |
+| 27 | `diff` and `save` take `config` as an optional first argument, matching `restore`, `adopt`, and `drop`; other categories are usage errors | 2026-11-18 |
