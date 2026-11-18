@@ -554,12 +554,15 @@ with the agent's exit code. The prompt contains:
 - the machine ID and the paths to `machine.conf`, `SPEC.md`,
   `POSTINSTALL.md`, the data repository's `AGENTS.md`, and this `DESIGN.md`;
 - current `check` output for the selected categories, as paths and statuses,
-  never file contents, and that local config changes are kept with
-  `envmgr save` or discarded with `envmgr restore config`;
+  never file contents; that `envmgr diff` shows local config changes, which
+  are kept with `envmgr save` or discarded with `envmgr restore config`; and
+  that the agent leaves the source of a target with a local change alone
+  until the user has done one or the other, because the target would then
+  be changed on both sides and `restore` would overwrite the local edit;
 - the approval boundary: the agent may edit `machines/<id>/` and repository
   documentation. It must not run `envmgr restore`, install packages, or
-  commit, and it ends by pointing the user to `envmgr restore` and
-  `envmgr publish`.
+  commit, and it ends by pointing the user to `envmgr save` (for local
+  changes they keep), then `envmgr restore`, then `envmgr publish`.
 
 Without an `agent=` setting, or when its command is not on `PATH`,
 `evaluate` exits `1` with instructions.
@@ -591,7 +594,9 @@ the right directory afterward.
    edits only `machines/<id>/`; it keeps source names so attributes carry
    over, copies `encrypted_` sources byte for byte without decrypting them,
    may read existing targets under `~` to merge them (except files that look
-   like secrets), proposes deleting an only-here target only when asked, and
+   like secrets), asks the user to save or discard a local change before
+   changing that target's source, proposes deleting an only-here target only
+   when asked, and
    never restores or commits. It ends by pointing the user to
    `envmgr restore config --dry-run`, `envmgr restore config`, and
    `envmgr publish`.
@@ -661,3 +666,4 @@ the right directory afterward.
 | 25 | Local edits reach the source through `save` (only targets whose source is unchanged since Chezmoi last wrote them); committing and pushing is `publish`, formerly `save`; `adopt` only starts managing targets | 2026-11-17 |
 | 26 | `diff` shows a target changed on both sides as each side's change from the version Chezmoi last wrote, found in the data repository's history by hash; envmgr does not merge, and `save --force` keeps this machine's version only for named targets | 2026-11-17 |
 | 27 | `diff` and `save` take `config` as an optional first argument, matching `restore`, `adopt`, and `drop`; other categories are usage errors | 2026-11-18 |
+| 28 | `evaluate` agents leave the source of a target with a local change alone until the user saves or discards it, so no target becomes changed on both sides through the agent | 2026-11-18 |
