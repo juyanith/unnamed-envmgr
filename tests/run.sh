@@ -1513,6 +1513,10 @@ test_evaluate_starts_agent() {
   assert_contains "$args" '`envmgr check config` (exit 3'
   assert_contains "$args" "pending  .alpha"
   assert_contains "$args" "Do not run envmgr restore"
+  assert_contains "$args" "them with envmgr diff, which is read-only"
+  assert_contains "$args" "Do not edit the source of a target with a local"
+  assert_contains "$args" "run envmgr save first if they keep any"
+  assert_contains "$args" "local changes, then envmgr restore, then envmgr publish."
   [[ "$args" != *private-content* ]] || fail "prompt includes target contents"
 
   FAKE_AGENT_RC=7 run_envmgr evaluate
@@ -1564,6 +1568,8 @@ test_evaluate_from_compares_machines() {
   assert_contains "$args" "only there  .onlythere"
   assert_contains "$args" "is missing on this machine"
   assert_contains "$args" "edit only files under"
+  assert_contains "$args" "ask the user to keep it with envmgr save or discard it"
+  assert_contains "$args" "symlink_"
   assert_contains "$args" "envmgr publish."
   [[ "$args" != *example-content* ]] || fail "prompt includes source contents"
 

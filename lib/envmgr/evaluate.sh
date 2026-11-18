@@ -27,9 +27,15 @@ $report
 
 Evaluate whether the machine's files under machines/$machine/ match its
 SPEC.md and explain any drift above. Propose changes, and make the ones the
-user approves. Local config changes are edits under ~ that are not in the
-source yet: the user keeps them with envmgr save or discards them with
-envmgr restore config.
+user approves.
+
+Local config changes are edits under ~ that are not in the source yet. See
+them with envmgr diff, which is read-only and does not show encrypted
+contents. The user keeps them with envmgr save or discards them with
+envmgr restore config. Do not edit the source of a target with a local
+change until the user has done one or the other (envmgr check config shows
+it): the target would be changed on both sides, envmgr save would refuse
+it, and envmgr restore would overwrite the local edit.
 
 Boundaries:
 - You may edit files under machines/$machine/ and the repository's
@@ -38,7 +44,8 @@ Boundaries:
   outside this repository.
 - Do not decrypt encrypted_ files or read the age key.
 - Do not commit or push. When you are done, summarize the changes so the user
-  can review them, run envmgr restore, and run envmgr publish.
+  can review them, then tell them to run envmgr save first if they keep any
+  local changes, then envmgr restore, then envmgr publish.
 EOF
 }
 
@@ -157,7 +164,10 @@ $comparison
 - only there: managed on $from only; a candidate to copy.
 - different: managed on both machines, with sources that differ in name or
   content; a candidate to merge or replace. Compare the two sources and,
-  where it helps, the target file on this machine.
+  where it helps, the target file on this machine. If the target has a
+  local change here (envmgr check config lists it as local; envmgr diff
+  shows it), ask the user to keep it with envmgr save or discard it before
+  you change its source, because envmgr restore config would overwrite it.
 - only here: managed on this machine only. It is listed for context; propose
   removing it only if the user asks.
 
@@ -170,7 +180,7 @@ Boundaries:
 - You may read anything under machines/$from/, but edit only files under
   machines/$machine/ and the repository's documentation.
 - Keep source names, including prefixes such as dot_, private_, executable_,
-  exact_, modify_, and encrypted_, so attributes carry over. A template may
+  exact_, empty_, symlink_, modify_, and encrypted_, so attributes carry over. A template may
   reference only files inside its own config/ directory; copy those too.
 - Copy encrypted_ sources byte for byte. Do not decrypt them or read the age
   key. If the key is missing, tell the user to copy it from another machine.
