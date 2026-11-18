@@ -459,8 +459,11 @@ test_save_copies_local_edits() {
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "rerun with --yes"
 
-  # Named targets limit the save.
-  run_envmgr save --yes "$HOME/.eps"
+  # Named targets limit the save; "config" may come first, as for restore.
+  run_envmgr save package "$HOME/.eps"
+  assert_eq "$rc" 2 "$out"
+  assert_contains "$out" "save applies only to config"
+  run_envmgr save config --yes "$HOME/.eps"
   assert_eq "$rc" 0 "$out"
   assert_contains "$out" "saved 1 target(s). Run envmgr publish"
   assert_eq "$(cat "$cfg/dot_eps")" e2
@@ -525,6 +528,16 @@ test_diff_shows_each_side() {
   run_envmgr diff "$HOME/.p"
   assert_eq "$rc" 0 "$out"
   [[ "$out" != *"~/.x"* ]] || fail "diff ignored its targets"
+  run_envmgr diff config "$HOME/.p"
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "~/.p: changed in the source"
+  [[ "$out" != *"~/.x"* ]] || fail "diff config ignored its targets"
+  run_envmgr diff config
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "~/.x: changed both here"
+  run_envmgr diff system
+  assert_eq "$rc" 2 "$out"
+  assert_contains "$out" "diff applies only to config"
   run_envmgr diff "$HOME/.missing"
   assert_eq "$rc" 1 "$out"
   assert_contains "$out" "is not managed"
