@@ -44,8 +44,10 @@ steps. It:
 2. For an SSH data URL on GitHub, creates `~/.ssh/id_ed25519` if needed,
    shows the public key, opens https://github.com/settings/ssh/new, and waits
    until GitHub accepts the key. `gh` is not needed.
-3. Clones the data repository (default
-   `git@github.com:juyanith/envmgr-data.git` into `~/Work/Git/envmgr-data`).
+3. Asks for the data repository's URL and clones it (by default into
+   `~/Work/Git/envmgr-data`). There is no default URL; to skip typing it,
+   set `ENVMGR_DATA_URL`, for example
+   `curl -fsSL .../install.sh | ENVMGR_DATA_URL=git@github.com:<user>/envmgr-data.git bash`.
 4. Selects this machine from the data repository, creates a new one, or
    skips. A new machine's ID defaults to the host name, and it is copied
    from the matching machine changed most recently unless you choose another

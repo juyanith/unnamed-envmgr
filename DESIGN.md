@@ -59,7 +59,7 @@ machines/
 ~/Work/Git/envmgr-data/           # data checkout; the user edits and commits here
 ~/.config/envmgr/config           # key=value, parsed, never sourced
   data=~/Work/Git/envmgr-data
-  data_url=git@github.com:juyanith/envmgr-data.git
+  data_url=git@github.com:<user>/envmgr-data.git
   machine=mac-mini
   agent=codex
 ~/.config/envmgr/age.key          # age identity; never committed
@@ -180,9 +180,12 @@ complete:
    prompt). Print the public key, open
    `https://github.com/settings/ssh/new`, and wait for confirmation. Verify
    access with `ssh -T git@github.com`. Does not use `gh`.
-3. **Data repository.** Ask for the URL (default
-   `git@github.com:juyanith/envmgr-data.git`) and checkout path (default
-   `~/Work/Git/envmgr-data`), then clone.
+3. **Data repository.** Ask for the URL and checkout path (default
+   `~/Work/Git/envmgr-data`), then clone. The URL has no built-in default,
+   because it is personal; the default offered is the `data_url` saved by an
+   earlier run, or else `ENVMGR_DATA_URL`. With neither, the prompt shows
+   `git@github.com:<username>/envmgr-data.git` as an example (not a default),
+   and a blank answer stops setup.
 4. **Machine.** Offer the existing machines whose `os`/`distribution` match
    the running system, a new machine (optionally copied from one of them), or
    skip (used during legacy migration). Selecting a machine runs
@@ -667,3 +670,4 @@ the right directory afterward.
 | 26 | `diff` shows a target changed on both sides as each side's change from the version Chezmoi last wrote, found in the data repository's history by hash; envmgr does not merge, and `save --force` keeps this machine's version only for named targets | 2026-11-17 |
 | 27 | `diff` and `save` take `config` as an optional first argument, matching `restore`, `adopt`, and `drop`; other categories are usage errors | 2026-11-18 |
 | 28 | `evaluate` agents leave the source of a target with a local change alone until the user saves or discards it, so no target becomes changed on both sides through the agent | 2026-11-18 |
+| 29 | `setup` has no built-in data repository URL; it offers the saved `data_url` or `ENVMGR_DATA_URL` as the default | 2026-11-21 |

@@ -2,7 +2,6 @@
 # envmgr setup: interactive, idempotent first-run walkthrough. Must run under
 # /bin/bash 3.2 on a fresh Mac before Homebrew exists.
 
-ENVMGR_DEFAULT_DATA_URL="git@github.com:juyanith/envmgr-data.git"
 ENVMGR_DEFAULT_DATA_PATH="~/Work/Git/envmgr-data"
 ENVMGR_SSH_KEY_URL="https://github.com/settings/ssh/new"
 
@@ -215,8 +214,17 @@ envmgr_setup_data() {
     return 0
   fi
 
+  # There is no built-in default: the URL is personal. A URL saved by an
+  # earlier run, or ENVMGR_DATA_URL, is offered as the default; without one,
+  # the prompt shows the URL's usual shape as an example.
   url="$(envmgr_kv_get "$config" data_url 2>/dev/null || true)"
-  url="$(envmgr_ask "Data repository URL" "${url:-$ENVMGR_DEFAULT_DATA_URL}")"
+  url="${url:-${ENVMGR_DATA_URL:-}}"
+  if [[ -n "$url" ]]; then
+    url="$(envmgr_ask "Data repository URL" "$url")"
+  else
+    url="$(envmgr_ask "Data repository URL (for example, git@github.com:<username>/envmgr-data.git)")"
+  fi
+  [[ -n "$url" ]] || envmgr_die 1 "a data repository URL is required"
   path="$(envmgr_ask "Checkout path" "$ENVMGR_DEFAULT_DATA_PATH")"
   envmgr_setup_ssh "$url"
   data="$(envmgr_expand_path "$path")"

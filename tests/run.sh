@@ -1229,6 +1229,20 @@ test_setup_guides_github_ssh() {
   assert_contains "$(cat "$HOME/.config/envmgr/config")" "data_url=git@github.com:someone/data.git"
 }
 
+test_setup_data_url_has_no_builtin_default() {
+  make_data_origin
+  run_setup "" ""
+  assert_eq "$rc" 1 "$out"
+  assert_contains "$out" "Data repository URL (for example, git@github.com:<username>/envmgr-data.git): "
+  assert_contains "$out" "a data repository URL is required"
+
+  export ENVMGR_DATA_URL="$data_origin"
+  run_setup "" "~/Work/data" 1 codex y y
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Data repository URL [$data_origin]: "
+  assert_contains "$(cat "$HOME/.config/envmgr/config")" "data_url=$data_origin"
+}
+
 test_setup_waits_for_command_line_tools() {
   make_data_origin
   export FAKE_STATE="$work/fake" FAKE_CLT_AFTER=3 ENVMGR_POLL_SECONDS=0
@@ -1961,7 +1975,7 @@ for test_bash in "${shells[@]}"; do
     work="$(mktemp -d)"
     if (
       export HOME="$work/home"
-      unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME
+      unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME ENVMGR_DATA_URL
       export ENVMGR_OS=darwin ENVMGR_DISTRIBUTION=macos ENVMGR_ARCHITECTURE=apple-silicon
       # Never open a browser or find the real Homebrew.
       export PATH="$root/tests/fakes-system:$PATH"
