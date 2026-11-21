@@ -831,6 +831,38 @@ test_homebrew_upgrades_and_holds() {
   assert_eq "$rc" 0 "$out"
 }
 
+test_homebrew_accepts_xcode_license() {
+  selected_mac
+  use_fake_brew
+  export FAKE_XCODE="$work/Xcode.app" ENVMGR_XCODE="$work/Xcode.app"
+  printf 'brew "fd"\nmas "Xcode", id: 497799835\n' >"$pkgs/homebrew/Brewfile"
+
+  # Xcode arrives partway through bundle, which then fails until the
+  # license is accepted and bundle runs again.
+  run_envmgr restore package homebrew --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Accepting the Xcode license"
+  assert_contains "$(cat "$FAKE_BREW_STATE/log")" "xcodebuild -license accept"
+  assert_eq "$(grep -c '^bundle install' "$FAKE_BREW_STATE/log")" 2
+
+  # Xcode already installed with its license pending: accept before bundle.
+  rm "$FAKE_BREW_STATE/xcode-license"
+  printf 'brew "jq"\n' >>"$pkgs/homebrew/Brewfile"
+  : >"$FAKE_BREW_STATE/log"
+  run_envmgr restore package homebrew --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$out" "Accepting the Xcode license"
+  assert_eq "$(grep -c '^bundle install' "$FAKE_BREW_STATE/log")" 1
+
+  # Accepted: nothing more to do.
+  printf 'brew "rg"\n' >>"$pkgs/homebrew/Brewfile"
+  : >"$FAKE_BREW_STATE/log"
+  run_envmgr restore package homebrew --yes
+  assert_eq "$rc" 0 "$out"
+  [[ "$out" != *"Accepting the Xcode license"* ]] || fail "accepted the license again"
+  assert_contains "$(cat "$FAKE_BREW_STATE/formulae")" rg
+}
+
 test_homebrew_adopt_and_drop() {
   selected_mac
   use_fake_brew
@@ -1980,6 +2012,8 @@ for test_bash in "${shells[@]}"; do
       # Never open a browser or find the real Homebrew.
       export PATH="$root/tests/fakes-system:$PATH"
       export ENVMGR_BREW="$root/tests/fakes/brew" FAKE_BREW_STATE="$work/brew"
+      # Never find the real Xcode.
+      export ENVMGR_XCODE="$work/no-xcode"
       mkdir -p "$FAKE_BREW_STATE"
       data="$work/data"
       export work

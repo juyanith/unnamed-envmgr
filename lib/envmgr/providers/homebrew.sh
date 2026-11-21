@@ -56,6 +56,32 @@ envmgr_brew_short() {
   printf '%s\n' "${1##*/}"
 }
 
+# Homebrew refuses to build formulae while an installed Xcode's license is
+# not accepted. ENVMGR_XCODE overrides the Xcode location (for tests).
+envmgr_brew_xcodebuild() {
+  printf '%s/Contents/Developer/usr/bin/xcodebuild\n' "${ENVMGR_XCODE:-/Applications/Xcode.app}"
+}
+
+# Succeeds when Xcode is installed and its license still needs accepting.
+envmgr_brew_xcode_license_pending() {
+  local xcodebuild=""
+
+  [[ "$ENVMGR_OS" == darwin ]] || return 1
+  xcodebuild="$(envmgr_brew_xcodebuild)"
+  [[ -x "$xcodebuild" ]] || return 1
+  ! "$xcodebuild" -license check >/dev/null 2>&1
+}
+
+envmgr_brew_accept_xcode_license() {
+  printf 'Accepting the Xcode license, which Homebrew requires; enter your password if asked.\n'
+  sudo "$(envmgr_brew_xcodebuild)" -license accept || return 1
+}
+
+envmgr_brew_bundle() {
+  HOMEBREW_BUNDLE_BREW_SKIP="${HOMEBREW_BUNDLE_BREW_SKIP:+$HOMEBREW_BUNDLE_BREW_SKIP }$1" \
+    envmgr_brew bundle install --no-upgrade --file="$ENVMGR_MANIFEST_DIR/Brewfile"
+}
+
 envmgr_pkg_homebrew_available() {
   envmgr_brew_find
 }
@@ -185,9 +211,17 @@ envmgr_pkg_homebrew_restore() {
       skip="${skip:+$skip }$name"
     fi
   done < <(envmgr_brew_held)
+  if envmgr_brew_xcode_license_pending; then
+    envmgr_brew_accept_xcode_license || return 1
+  fi
   if [[ -f "$ENVMGR_MANIFEST_DIR/Brewfile" ]]; then
-    HOMEBREW_BUNDLE_BREW_SKIP="${HOMEBREW_BUNDLE_BREW_SKIP:+$HOMEBREW_BUNDLE_BREW_SKIP }$skip" \
-      envmgr_brew bundle install --no-upgrade --file="$ENVMGR_MANIFEST_DIR/Brewfile" || return 1
+    # A mas entry can install Xcode partway through, failing the formulae
+    # after it; accept the new license and run bundle once more.
+    if ! envmgr_brew_bundle "$skip"; then
+      envmgr_brew_xcode_license_pending || return 1
+      envmgr_brew_accept_xcode_license || return 1
+      envmgr_brew_bundle "$skip" || return 1
+    fi
   fi
 
   outdated="$(envmgr_brew_outdated)" || return 1

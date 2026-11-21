@@ -10,6 +10,11 @@ has() { grep -Fxq -- "$2" "$state/$1"; }
 add() { has "$1" "$2" || printf '%s\n' "$2" >>"$state/$1"; }
 del() { grep -Fxv -- "$2" "$state/$1" >"$state/$1.tmp" || true; mv "$state/$1.tmp" "$state/$1"; }
 
+install_xcode() {
+  mkdir -p "$FAKE_XCODE/Contents/Developer/usr/bin"
+  cp "$(dirname -- "$0")/xcodebuild" "$FAKE_XCODE/Contents/Developer/usr/bin/xcodebuild"
+}
+
 case "$1" in
   update) ;;
   --prefix) printf '%s\n' "$state/prefix" ;;
@@ -30,8 +35,15 @@ case "$1" in
           add formulae "${name##*/}" ;;
         cask) add casks "$name" ;;
         tap) add taps "$name" ;;
+        mas) [[ "$name" != Xcode || -z "${FAKE_XCODE:-}" ]] || install_xcode ;;
       esac
     done <"$file"
+    # Like Homebrew, refuse to finish while Xcode's license is not accepted.
+    if [[ -n "${FAKE_XCODE:-}" && -x "$FAKE_XCODE/Contents/Developer/usr/bin/xcodebuild" \
+      && ! -f "$state/xcode-license" ]]; then
+      printf 'Error: You have not agreed to the Xcode license.\n' >&2
+      exit 1
+    fi
     ;;
   upgrade)
     kind="$2"; shift 2

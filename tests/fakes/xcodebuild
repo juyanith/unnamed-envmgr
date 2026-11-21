@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Fake xcodebuild, installed by the fake brew into $FAKE_XCODE. The license
+# is accepted once $FAKE_BREW_STATE/xcode-license exists.
+set -euo pipefail
+state="${FAKE_BREW_STATE:?}"
+printf 'xcodebuild %s\n' "$*" >>"$state/log"
+case "$1 ${2:-}" in
+  "-license check") [[ -f "$state/xcode-license" ]] || exit 69 ;;
+  "-license accept") touch "$state/xcode-license" ;;
+  *) printf 'fake xcodebuild: unsupported: %s\n' "$*" >&2; exit 1 ;;
+esac
