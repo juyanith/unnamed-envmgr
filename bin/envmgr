@@ -24,6 +24,9 @@ export ENVMGR_ROOT
 source "$ENVMGR_ROOT/lib/envmgr/common.sh"
 # shellcheck source=lib/envmgr/platform.sh
 source "$ENVMGR_ROOT/lib/envmgr/platform.sh"
+# Detect once here: later calls often run inside $(...), whose exports are
+# lost, so code in this shell would otherwise read unset variables.
+envmgr_detect_platform
 # shellcheck source=lib/envmgr/machine.sh
 source "$ENVMGR_ROOT/lib/envmgr/machine.sh"
 # shellcheck source=lib/envmgr/summary.sh
