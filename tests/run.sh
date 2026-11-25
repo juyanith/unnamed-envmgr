@@ -863,6 +863,22 @@ test_homebrew_accepts_xcode_license() {
   assert_contains "$(cat "$FAKE_BREW_STATE/formulae")" rg
 }
 
+# Without the ENVMGR_OS override, envmgr detects the platform itself, and
+# providers that read ENVMGR_OS must still see it.
+test_restore_detects_os_without_override() {
+  selected_mac
+  use_fake_brew
+  # shellcheck source=lib/envmgr/platform.sh
+  source "$root/lib/envmgr/platform.sh"
+  printf 'os=%s\ndistribution=macos\n' "$(envmgr_detect_os)" \
+    >"$data/machines/mac/machine.conf"
+  unset ENVMGR_OS
+  printf 'brew "fd"\n' >"$pkgs/homebrew/Brewfile"
+  run_envmgr restore package homebrew --yes
+  assert_eq "$rc" 0 "$out"
+  assert_contains "$(cat "$FAKE_BREW_STATE/formulae")" fd
+}
+
 test_homebrew_adopt_and_drop() {
   selected_mac
   use_fake_brew
